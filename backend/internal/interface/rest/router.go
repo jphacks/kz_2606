@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -17,12 +18,12 @@ type CookieOptions struct {
 	Lifetime time.Duration
 }
 
-func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomService, cookies CookieOptions) *http.ServeMux {
+func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomService, cookies CookieOptions, registry *ws.Registry) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", rootHandler)
 	handler := &authHandler{service: authService, cookies: cookies}
-	rooms := &roomHandler{rooms: roomService}
-	admin := &adminHandler{rooms: roomService}
+	rooms := &roomHandler{rooms: roomService, registry: registry}
+	admin := &adminHandler{rooms: roomService, registry: registry}
 	mux.HandleFunc("POST /api/auth/register", handler.register)
 	mux.HandleFunc("POST /api/auth/login", handler.login)
 	mux.HandleFunc("POST /api/auth/logout", handler.logout)

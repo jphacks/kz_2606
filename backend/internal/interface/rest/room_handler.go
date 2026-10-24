@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
 type roomHandler struct {
-	rooms *usecase.RoomService
+	rooms    *usecase.RoomService
+	registry *ws.Registry
 }
 
 type createRoomRequest struct {
@@ -94,7 +96,7 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_format", "リクエスト形式が正しくありません")
 		return
 	}
-	room, member, err := h.rooms.Join(r.Context(), r.PathValue("code"), user.ID, input.DisplayName, input.Color)
+	room, member, joined, err := h.rooms.Join(r.Context(), r.PathValue("code"), user.ID, input.DisplayName, input.Color)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrInvalidDisplayName):
@@ -112,6 +114,9 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		}
 		return
+	}
+	if joined {
+		h.registry.BroadcastMember(room.Code, member, false, 0)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Member memberResponse `json:"member"`

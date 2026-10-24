@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -77,7 +78,7 @@ func TestRegisterRetriesPersonalRoomCodeCollision(t *testing.T) {
 		members:           make(map[string][]domain.Member),
 		codeConflictsLeft: 1,
 	}
-	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	if response.Code != http.StatusOK || len(users.rooms) != 1 || len(users.members) != 1 {
@@ -191,7 +192,7 @@ func TestAuthEndpoints(t *testing.T) {
 		rooms:   make(map[string]domain.Room),
 		members: make(map[string][]domain.Member),
 	}
-	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies, ws.NewRegistry())
 
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"Taro_1","password":"password123"}`))
@@ -307,7 +308,7 @@ func TestAllProtectedRoutesRequireAuth(t *testing.T) {
 }
 
 func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/login", `{"username":"missing","password":"password123"}`))
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"invalid_credentials"`) {
@@ -316,7 +317,7 @@ func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
 }
 
 func TestRegisterRejectsInvalidCredentials(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"ab","password":"short"}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
@@ -325,7 +326,7 @@ func TestRegisterRejectsInvalidCredentials(t *testing.T) {
 }
 
 func TestRegisterAcceptsSixteenCharacterUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON(
 		"/api/auth/register",
@@ -337,7 +338,7 @@ func TestRegisterAcceptsSixteenCharacterUsername(t *testing.T) {
 }
 
 func TestRegisterRejectsSeventeenCharacterUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON(
 		"/api/auth/register",
@@ -349,7 +350,7 @@ func TestRegisterRejectsSeventeenCharacterUsername(t *testing.T) {
 }
 
 func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":""}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_password"`) {
@@ -358,7 +359,7 @@ func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
 }
 
 func TestRegisterRejectsNonJSONContentType(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
 		request := httptest.NewRequest(
 			http.MethodPost,
@@ -382,7 +383,7 @@ func TestRegisterRejectsNonJSONContentType(t *testing.T) {
 }
 
 func TestLoginAcceptsUnknownFields(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies, ws.NewRegistry())
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	if register.Code != http.StatusOK {
@@ -396,7 +397,7 @@ func TestLoginAcceptsUnknownFields(t *testing.T) {
 }
 
 func TestCookieSecureIsConfigurable(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, CookieOptions{Secure: false, Lifetime: time.Hour})
+	router := NewRouter(newTestAuthService(), nil, CookieOptions{Secure: false, Lifetime: time.Hour}, ws.NewRegistry())
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	cookies := response.Result().Cookies()
@@ -415,7 +416,7 @@ func TestLoginCreatesPersonalRoomForExistingAccount(t *testing.T) {
 		members: make(map[string][]domain.Member),
 		nextID:  42,
 	}
-	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies, ws.NewRegistry())
 
 	login := httptest.NewRecorder()
 	router.ServeHTTP(login, postJSON("/api/auth/login", `{"username":"legacy_1","password":"password123"}`))
@@ -466,7 +467,7 @@ func TestMeCreatesPersonalRoomForExistingAccount(t *testing.T) {
 		members: make(map[string][]domain.Member),
 		nextID:  7,
 	}
-	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies, ws.NewRegistry())
 
 	request := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "user-7"})
