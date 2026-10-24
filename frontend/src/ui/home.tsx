@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
-import { Waypoints, Footprints, Flag, Link as LinkIcon, Plus, X } from 'lucide-react';
+import { useState } from 'react';
+import { Waypoints, Footprints, Flag, Link as LinkIcon, Plus, X, History } from 'lucide-react';
 
 export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] font-sans text-gray-800 relative pb-12 overflow-x-hidden">
-      {/* --- ヘッダー --- */}
-      <header className="flex justify-between items-center p-5">
+    <div 
+      className="min-h-screen bg-[#FAFAFA] font-sans text-gray-800 relative pb-12 overflow-x-hidden"
+      style={{ colorScheme: 'light' }}
+    >
+      {/* --- ヘッダー（ステータスバーのセーフエリア対応） --- */}
+      <header className="flex justify-between items-center px-5 pb-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-2 text-[#0e7861]">
           <Waypoints size={28} strokeWidth={2.5} />
           <span className="text-xl font-bold tracking-wider text-gray-900">まちえ</span>
@@ -30,10 +33,10 @@ export default function Home() {
           </p>
         </div>
 
-        {/* ヒーロー画像（用意した画像を読み込む） */}
+        {/* ヒーロー画像（パス変更済み） */}
         <div className="relative w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100 flex items-center justify-center">
           <img 
-            src="/Hero map inset.png" 
+            src="/hero-map.png" 
             alt="GPSアートの軌跡" 
             className="w-full h-full object-cover"
           />
@@ -42,8 +45,9 @@ export default function Home() {
         {/* アクションセクション */}
         <div className="mb-8">
           <div className="flex justify-between items-end mb-4">
+            {/* コピーの重複を避けるためスッキリと変更 */}
             <h2 className="text-lg font-bold text-gray-900 leading-tight">
-              一人でも、チームでも。<br />アートをはじめる
+              アートをはじめる
             </h2>
             <span className="text-xs text-gray-500">登録・インストール不要</span>
           </div>
@@ -75,10 +79,10 @@ export default function Home() {
             </button>
           </div>
 
-          {/* 活動履歴を見る ボタン */}
+          {/* 活動履歴を見る ボタン（アイコン変更） */}
           <button className="w-full mt-4 bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex items-center gap-4 active:bg-gray-50 transition">
             <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0e7861]">
-              <Footprints size={24} />
+              <History size={24} />
             </div>
             <div className="text-left">
               <h3 className="font-bold text-gray-900 text-sm mb-1">活動履歴を見る</h3>
@@ -92,16 +96,19 @@ export default function Home() {
       <div 
         className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${isModalOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
         onClick={() => setIsModalOpen(false)}
+        aria-hidden={!isModalOpen}
       ></div>
 
       <div 
-        className={`fixed bottom-0 left-0 right-0 bg-[#FAFAFA] rounded-t-3xl z-50 transform transition-transform duration-300 ease-out flex flex-col max-h-[90vh] ${isModalOpen ? 'translate-y-0' : 'translate-y-full'}`}
+        className={`fixed bottom-0 left-0 right-0 bg-[#FAFAFA] rounded-t-3xl z-50 transform transition-transform duration-300 ease-out flex flex-col max-h-[90vh] ${isModalOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'}`}
+        aria-hidden={!isModalOpen}
       >
         <div className="w-full flex justify-center pt-3 pb-1">
           <div className="w-12 h-1.5 bg-gray-300 rounded-full"></div>
         </div>
 
-        <div className="px-6 pb-8 pt-2 overflow-y-auto">
+        {/* ホームインジケーターのセーフエリア対応 */}
+        <div className="px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-2 overflow-y-auto">
           <div className="flex justify-between items-start mb-6">
             <div>
               <h2 className="text-xl font-bold text-gray-900 mb-1">チームではじめる</h2>
@@ -110,6 +117,7 @@ export default function Home() {
             <button 
               onClick={() => setIsModalOpen(false)}
               className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition"
+              aria-label="閉じる"
             >
               <X size={20} />
             </button>
@@ -123,9 +131,13 @@ export default function Home() {
                 type="text" 
                 placeholder="まちあるき部" 
                 className="w-full outline-none text-gray-800 placeholder-gray-400 bg-transparent"
+                tabIndex={isModalOpen ? 0 : -1}
               />
             </div>
-            <button className="w-full bg-[#0e7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0a5a47] transition shadow-md">
+            <button 
+              className="w-full bg-[#0e7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0a5a47] transition shadow-md"
+              tabIndex={isModalOpen ? 0 : -1}
+            >
               <Plus size={20} />
               チームを作成
             </button>
@@ -139,10 +151,19 @@ export default function Home() {
                 type="text" 
                 placeholder="招待URLを貼り付け" 
                 className="w-full outline-none text-gray-800 placeholder-gray-400 bg-transparent"
+                tabIndex={isModalOpen ? 0 : -1}
               />
-              <button className="text-[#0e7861] text-sm font-bold whitespace-nowrap ml-2">貼り付け</button>
+              <button 
+                className="text-[#0e7861] text-sm font-bold whitespace-nowrap ml-2"
+                tabIndex={isModalOpen ? 0 : -1}
+              >
+                貼り付け
+              </button>
             </div>
-            <button className="w-full bg-white border border-[#0e7861] text-[#0e7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition">
+            <button 
+              className="w-full bg-white border border-[#0e7861] text-[#0e7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition"
+              tabIndex={isModalOpen ? 0 : -1}
+            >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 12h14"></path>
                 <path d="m12 5 7 7-7 7"></path>
