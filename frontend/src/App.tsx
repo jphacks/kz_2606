@@ -4,6 +4,7 @@ import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 import Auth from './ui/signin';
 import Result from './ui/result';
+import Auth from './ui/Auth';
 
 export default function App() {
   const path = window.location.pathname;
