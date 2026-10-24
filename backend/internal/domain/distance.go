@@ -3,8 +3,9 @@ package domain
 import "math"
 
 // GapMillis を超えて時刻が離れた点の間は距離に数えない。
-// クライアント側の GAP_MS と同じ値にしてあり、片方だけ変えると
-// サーバーとクライアントで距離がズレる。仕様: DATA_MODEL.md 11章
+// 「超えて」は仕様 3章の `> 30秒` と同じで、ちょうど 30 秒は数える。
+// クライアント側の GAP_MS と同じ値・同じ境界にしてあり、片方だけ変えると
+// サーバーとクライアントで距離がズレる。仕様: DATA_MODEL.md 3章・11章
 const GapMillis int64 = 30_000
 
 const earthRadiusMeters = 6371000.0
@@ -22,11 +23,11 @@ func Distance(from, to Point) float64 {
 }
 
 // PathLength は点列の累積距離をメートルで返す。
-// GapMillis 以上空いた区間は、その間に移動を記録できていないので加算しない。
+// GapMillis を超えて空いた区間は、その間に移動を記録できていないので加算しない。
 func PathLength(points []Point) float64 {
 	total := 0.0
 	for i := 1; i < len(points); i++ {
-		if points[i].TS-points[i-1].TS >= GapMillis {
+		if points[i].TS-points[i-1].TS > GapMillis {
 			continue
 		}
 		total += Distance(points[i-1], points[i])

@@ -28,10 +28,28 @@ func TestRouteStatsSumsItsOwnPoints(t *testing.T) {
 
 func TestRouteStatsSkipsGapsOverThreshold(t *testing.T) {
 	route := newRouteFixture()
-	route.Points[2].TS = route.Points[1].TS + GapMillis
+	route.Points[2].TS = route.Points[1].TS + GapMillis + 1
 	stats := route.Stats(time.Now())
 	if math.Abs(stats.Meters-65.987835) > 0.001 {
 		t.Fatalf("ギャップ区間を加算しています: Meters = %f, want 65.987835", stats.Meters)
+	}
+}
+
+func TestRouteStatsCountsExactlyGapMillis(t *testing.T) {
+	// 仕様 3章は「直前の点から `> 30秒`」をギャップとするので、
+	// ちょうど GapMillis は**数える**。フロントの geo.ts も同じ境界。
+	route := newRouteFixture()
+	route.Points = route.Points[:2]
+	route.Points[1].TS = route.Points[0].TS + GapMillis
+	stats := route.Stats(time.Now())
+	if math.Abs(stats.Meters-65.987835) > 0.001 {
+		t.Fatalf("ちょうど30秒を除外しています: Meters = %f, want 65.987835", stats.Meters)
+	}
+
+	// 1ミリ秒でも超えたら数えない
+	route.Points[1].TS = route.Points[0].TS + GapMillis + 1
+	if stats := route.Stats(time.Now()); stats.Meters != 0 {
+		t.Fatalf("30秒超を加算しています: Meters = %f, want 0", stats.Meters)
 	}
 }
 

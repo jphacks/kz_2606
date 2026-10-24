@@ -42,11 +42,11 @@ func TestPathLengthSumsConsecutivePoints(t *testing.T) {
 }
 
 func TestPathLengthSkipsGapsOverThreshold(t *testing.T) {
-	// 2点目と3点目の間が GapMillis 以上空いているので、その区間は加算しない
+	// 2点目と3点目の間が GapMillis を超えて空いているので、その区間は加算しない
 	points := []Point{
 		{Lat: 43.0607, Lng: 141.3544, TS: 1000},
 		{Lat: 43.0611, Lng: 141.3550, TS: 2000},
-		{Lat: 43.0615, Lng: 141.3556, TS: 2000 + GapMillis},
+		{Lat: 43.0615, Lng: 141.3556, TS: 2000 + GapMillis + 1},
 	}
 	if got := PathLength(points); math.Abs(got-65.987835) > 0.001 {
 		t.Fatalf("ギャップ区間を加算しています: PathLength = %f, want 65.987835", got)
