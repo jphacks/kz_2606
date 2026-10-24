@@ -137,6 +137,7 @@ function MainExperience() {
           // ⚙️ 設定画面（メンバーとカラー）
           <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
             <Setting 
+              initialColor={userColor}
               onBack={() => setCurrentScreen('before_record')}
               onSaveAndReturn={(selectedColor) => {
                 setUserColor(selectedColor);

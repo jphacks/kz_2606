@@ -16,6 +16,7 @@ interface SettingProps {
   teamName?: string;
   memberCount?: number;
   members?: Member[];
+  initialColor?: string;
   onSaveAndReturn?: (selectedColor: string) => void;
   onBack?: () => void;
 }
@@ -29,11 +30,12 @@ export default function Setting({
     { id: '3', name: 'はる', status: '記録中', distance: '1.10 km', color: '#3498DB', avatarBg: 'bg-[#3498DB]', isMe: false },
     { id: '4', name: 'りん', status: '記録中', distance: '0.86 km', color: '#E91E63', avatarBg: 'bg-[#E91E63]', isMe: false },
   ],
+  initialColor = '#0E7861',
   onSaveAndReturn,
   onBack
 }: SettingProps) {
-  // 選択中のカラーを管理するステート
-  const [selectedColor, setSelectedColor] = useState('#0E7861');
+  // 選択中のカラーを管理するステート（前回保存した色を初期値にする）
+  const [selectedColor, setSelectedColor] = useState(initialColor);
   const [copied, setCopied] = useState(false);
 
   // 10色（5色×2行）のカラーパレット
