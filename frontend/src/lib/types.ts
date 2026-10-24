@@ -3,4 +3,7 @@
 //
 // TODO: Point / Member / ServerMsg / ClientMsg / PALETTE
 
-export {};
+export interface User {
+  id: number;
+  username: string;
+}
