@@ -189,6 +189,9 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 | `POST /api/auth/logout` | — | `204` | — |
 | `GET /api/auth/me` | — | `200 {user}` | `401 unauthorized` |
 
+登録時の `username` は3〜20文字の英数字または `_`（大文字は小文字に正規化）、
+`password` は8〜72バイトとする。ログインと登録はいずれも `{username, password}` を受け取る。
+
 ```json
 // user の形
 {"user": {"id": 1, "username": "taro"}}
