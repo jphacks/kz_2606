@@ -3,6 +3,7 @@ import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
+import Result from './ui/result';
 import Auth from './ui/Auth';
 
 export default function App() {
@@ -10,6 +11,10 @@ export default function App() {
 
   if (path === '/login' || path === '/signin') {
     return <Auth />;
+  }
+
+  if (path === '/result') {
+    return <Result />;
   }
 
   return <MainExperience />;
