@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
+import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
 
@@ -12,7 +13,7 @@ export default function App() {
     return <Auth />;
   }
 
-    if (path === '/result') {
+  if (path === '/result') {
     return <Result />;
   }
 
@@ -20,11 +21,12 @@ export default function App() {
 }
 
 function MainExperience() {
-  // 今表示している画面を管理する
-  const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record'>('home');
+  // 現在どの画面にいるかを管理 ("home" | "before_record" | "setting")
+  const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record' | 'setting'>('home');
   
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
+  const [userColor, setUserColor] = useState('#0E7861'); // 選択した軌跡カラー
 
   useEffect(() => {
     if ('geolocation' in navigator) {
@@ -70,11 +72,11 @@ function MainExperience() {
       }}>
 
         {/* 画面の切り替え */}
-        {currentScreen === 'home' ? (
+        {currentScreen === 'home' && (
           // ホーム画面
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <Home />
-            {/* 画面遷移用ボタン */}
+            {/* 🗺️ マップ画面へ進むボタン */}
             <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
               <button
                 onClick={() => setCurrentScreen('before_record')}
@@ -95,16 +97,54 @@ function MainExperience() {
               </button>
             </div>
           </div>
-        ) : (
-          // マップ ＋ 記録前画面
-          <>
+        )}
+
+        {currentScreen === 'before_record' && (
+          // 🗺️ 地図を全面にし、カードレイヤーを上に重ねる構造 (flex: 1 を追加)
+          <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
+
+            {/* 1. 背面のマップ（全体に敷き詰める） */}
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
               <MapView position={position} hasLocation={hasLocation} />
             </div>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10, pointerEvents: 'none' }}>
-              <BeforeRecord hasLocation={hasLocation} onStartRecording={handleStartRecording} />
+
+            {/* 2. 前面のオーバーレイUI */}
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              pointerEvents: 'none',
+              padding: '16px',
+              boxSizing: 'border-box'
+            }}>
+              <BeforeRecord
+                hasLocation={hasLocation}
+                onStartRecording={handleStartRecording}
+                onOpenSetting={() => setCurrentScreen('setting')}
+              />
             </div>
-          </>
+
+          </div>
+        )}
+
+        {currentScreen === 'setting' && (
+          // ⚙️ 設定画面（メンバーとカラー）
+          <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
+            <Setting
+              initialColor={userColor}
+              onBack={() => setCurrentScreen('before_record')}
+              onSaveAndReturn={(selectedColor) => {
+                setUserColor(selectedColor);
+                setCurrentScreen('before_record');
+              }}
+            />
+          </div>
         )}
 
       </div>
