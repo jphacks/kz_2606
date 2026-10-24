@@ -15,8 +15,8 @@ type RoomRepository interface {
 	FindByCode(ctx context.Context, code string) (domain.Room, error)
 	Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error)
 	Snapshot(ctx context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error)
-	Close(ctx context.Context, code string, userID int64) (time.Time, error)
-	Reopen(ctx context.Context, code string, userID int64) error
+	Close(ctx context.Context, code string, userID int64) (time.Time, int64, bool, error)
+	Reopen(ctx context.Context, code string, userID int64) (int64, bool, error)
 	Ban(ctx context.Context, code string, userID, memberID int64) error
 	Unban(ctx context.Context, code string, userID, memberID int64) error
 	DeleteRoute(ctx context.Context, code string, userID, routeID int64) error
@@ -81,18 +81,18 @@ func (s *RoomService) Snapshot(ctx context.Context, code string, userID int64) (
 	return s.rooms.Snapshot(ctx, normalizedCode, userID)
 }
 
-func (s *RoomService) Close(ctx context.Context, code string, userID int64) (time.Time, error) {
+func (s *RoomService) Close(ctx context.Context, code string, userID int64) (time.Time, int64, bool, error) {
 	normalizedCode, err := domain.NormalizeRoomCode(code)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	return s.rooms.Close(ctx, normalizedCode, userID)
 }
 
-func (s *RoomService) Reopen(ctx context.Context, code string, userID int64) error {
+func (s *RoomService) Reopen(ctx context.Context, code string, userID int64) (int64, bool, error) {
 	normalizedCode, err := domain.NormalizeRoomCode(code)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	return s.rooms.Reopen(ctx, normalizedCode, userID)
 }

@@ -236,10 +236,10 @@ func readMember(ctx context.Context, tx pgx.Tx, roomID, userID int64) (domain.Me
 	return member, nil
 }
 
-func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, error) {
+func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, int64, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -247,10 +247,22 @@ func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (
 
 	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if ownerUserID != userID {
-		return time.Time{}, domain.ErrForbidden
+		return time.Time{}, 0, false, domain.ErrForbidden
+	}
+	var ownerMemberID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM members WHERE room_id = $1 AND user_id = $2
+	`, roomID, ownerUserID).Scan(&ownerMemberID); err != nil {
+		return time.Time{}, 0, false, err
+	}
+	var wasClosed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT closed_at IS NOT NULL FROM rooms WHERE id = $1
+	`, roomID).Scan(&wasClosed); err != nil {
+		return time.Time{}, 0, false, err
 	}
 	var closedAt time.Time
 	err = tx.QueryRow(ctx, `
@@ -260,25 +272,25 @@ func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (
 		RETURNING closed_at
 	`, roomID).Scan(&closedAt)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE routes
 		SET ended_at = $2
 		WHERE room_id = $1 AND ended_at IS NULL
 	`, roomID, closedAt); err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
-	return closedAt, nil
+	return closedAt, ownerMemberID, !wasClosed, nil
 }
 
-func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) error {
+func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) (int64, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -286,15 +298,29 @@ func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) 
 
 	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if ownerUserID != userID {
-		return domain.ErrForbidden
+		return 0, false, domain.ErrForbidden
 	}
-	if _, err := tx.Exec(ctx, `UPDATE rooms SET closed_at = NULL WHERE id = $1`, roomID); err != nil {
-		return err
+	var ownerMemberID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM members WHERE room_id = $1 AND user_id = $2
+	`, roomID, ownerUserID).Scan(&ownerMemberID); err != nil {
+		return 0, false, err
 	}
-	return tx.Commit(ctx)
+	result, err := tx.Exec(ctx, `
+		UPDATE rooms SET closed_at = NULL
+		WHERE id = $1 AND closed_at IS NOT NULL
+	`, roomID)
+	if err != nil {
+		return 0, false, err
+	}
+	changed := result.RowsAffected() > 0
+	if err := tx.Commit(ctx); err != nil {
+		return 0, false, err
+	}
+	return ownerMemberID, changed, nil
 }
 
 func (r *RoomRepository) Ban(ctx context.Context, code string, userID, memberID int64) error {

@@ -22,18 +22,18 @@ func (h *adminHandler) close(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	room, err := h.rooms.FindByCode(r.Context(), r.PathValue("code"))
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
 	if err != nil {
-		h.writeRoomError(w, err, "load room before closing")
+		h.writeRoomError(w, err, "normalize room code before closing")
 		return
 	}
-	closedAt, err := h.rooms.Close(r.Context(), r.PathValue("code"), user.ID)
+	closedAt, ownerMemberID, changed, err := h.rooms.Close(r.Context(), code, user.ID)
 	if err != nil {
 		h.writeRoomError(w, err, "close room")
 		return
 	}
-	if room.ClosedAt == nil {
-		h.registry.BroadcastClosed(room.Code, closedAt, room.OwnerMemberID)
+	if changed {
+		h.registry.BroadcastClosed(code, closedAt, ownerMemberID)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		ClosedAt time.Time `json:"closedAt"`
@@ -45,17 +45,18 @@ func (h *adminHandler) reopen(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	room, err := h.rooms.FindByCode(r.Context(), r.PathValue("code"))
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
 	if err != nil {
-		h.writeRoomError(w, err, "load room before reopening")
+		h.writeRoomError(w, err, "normalize room code before reopening")
 		return
 	}
-	if err := h.rooms.Reopen(r.Context(), r.PathValue("code"), user.ID); err != nil {
+	ownerMemberID, changed, err := h.rooms.Reopen(r.Context(), code, user.ID)
+	if err != nil {
 		h.writeRoomError(w, err, "reopen room")
 		return
 	}
-	if room.ClosedAt != nil {
-		h.registry.BroadcastReopened(room.Code, room.OwnerMemberID)
+	if changed {
+		h.registry.BroadcastReopened(code, ownerMemberID)
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -110,7 +111,11 @@ func (h *adminHandler) deleteRoute(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "route_not_found", "記録が見つかりません")
 		return
 	}
-	code := r.PathValue("code")
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
+	if err != nil {
+		h.writeRouteError(w, err, "normalize room code before deleting route")
+		return
+	}
 	if err := h.rooms.DeleteRoute(r.Context(), code, user.ID, routeID); err != nil {
 		h.writeRouteError(w, err, "delete route")
 		return
