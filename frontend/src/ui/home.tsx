@@ -5,24 +5,24 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
-    <div 
+    <div
       className="min-h-screen bg-[#FAFAFA] font-sans text-gray-800 relative pb-12 overflow-x-hidden"
       style={{ colorScheme: 'light' }}
     >
       {/* --- ヘッダー（ステータスバーのセーフエリア対応） --- */}
       <header className="flex justify-between items-center px-5 pb-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-2 text-[#0e7861]">
+        <div className="flex items-center gap-2 text-[#0E7861]">
           <Waypoints size={28} strokeWidth={2.5} />
           <span className="text-xl font-bold tracking-wider text-gray-900">まちえ</span>
         </div>
-        <button className="text-sm text-[#0e7861] font-medium">使い方</button>
+        <button className="text-sm text-[#0E7861] font-medium">使い方</button>
       </header>
 
       {/* --- メインコンテンツ --- */}
       <main className="px-5">
         {/* キャッチコピー */}
         <div className="mt-4 mb-6">
-          <p className="text-[#0e7861] text-sm font-bold leading-relaxed mb-2">
+          <p className="text-[#0E7861] text-sm font-bold leading-relaxed mb-2">
             一人でも、みんなでも。<br />歩いた軌跡をアートに。
           </p>
           <h1 className="text-3xl font-extrabold text-gray-900 leading-tight">
@@ -33,7 +33,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* ヒーロー画像（パス変更済み） */}
+        {/* ヒーロー画像 */}
         <div className="relative w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100 flex items-center justify-center">
           <img 
             src="/hero-map.png" 
@@ -45,7 +45,6 @@ export default function Home() {
         {/* アクションセクション */}
         <div className="mb-8">
           <div className="flex justify-between items-end mb-4">
-            {/* コピーの重複を避けるためスッキリと変更 */}
             <h2 className="text-lg font-bold text-gray-900 leading-tight">
               アートをはじめる
             </h2>
@@ -55,7 +54,7 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-4">
             {/* 一人ではじめる ボタン */}
             <button className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition">
-              <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0e7861]">
+              <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
                 <Footprints size={24} />
               </div>
               <div className="text-left">
@@ -69,7 +68,7 @@ export default function Home() {
               onClick={() => setIsModalOpen(true)}
               className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition"
             >
-              <div className="bg-[#0e7861] p-3 rounded-full text-white">
+              <div className="bg-[#0E7861] p-3 rounded-full text-white">
                 <Flag size={24} />
               </div>
               <div className="text-left">
@@ -79,9 +78,9 @@ export default function Home() {
             </button>
           </div>
 
-          {/* 活動履歴を見る ボタン（アイコン変更） */}
+          {/* 活動履歴を見る ボタン */}
           <button className="w-full mt-4 bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex items-center gap-4 active:bg-gray-50 transition">
-            <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0e7861]">
+            <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
               <History size={24} />
             </div>
             <div className="text-left">
@@ -125,8 +124,8 @@ export default function Home() {
 
           <div className="mb-8">
             <h3 className="font-bold text-gray-900 mb-3">チームを作る</h3>
-            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0e7861] transition">
-              <Flag size={20} className="text-[#0e7861] mr-3" />
+            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0E7861] transition">
+              <Flag size={20} className="text-[#0E7861] mr-3" />
               <input 
                 type="text" 
                 placeholder="まちあるき部" 
@@ -135,7 +134,7 @@ export default function Home() {
               />
             </div>
             <button 
-              className="w-full bg-[#0e7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0a5a47] transition shadow-md"
+              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md"
               tabIndex={isModalOpen ? 0 : -1}
             >
               <Plus size={20} />
@@ -145,7 +144,7 @@ export default function Home() {
 
           <div>
             <h3 className="font-bold text-gray-900 mb-3">招待された方はこちら</h3>
-            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0e7861] transition">
+            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0E7861] transition">
               <LinkIcon size={20} className="text-gray-400 mr-3" />
               <input 
                 type="text" 
@@ -154,14 +153,14 @@ export default function Home() {
                 tabIndex={isModalOpen ? 0 : -1}
               />
               <button 
-                className="text-[#0e7861] text-sm font-bold whitespace-nowrap ml-2"
+                className="text-[#0E7861] text-sm font-bold whitespace-nowrap ml-2"
                 tabIndex={isModalOpen ? 0 : -1}
               >
                 貼り付け
               </button>
             </div>
             <button 
-              className="w-full bg-white border border-[#0e7861] text-[#0e7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition"
+              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition"
               tabIndex={isModalOpen ? 0 : -1}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
