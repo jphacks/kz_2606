@@ -158,6 +158,30 @@ func TestRegisterRejectsInvalidCredentials(t *testing.T) {
 	}
 }
 
+func TestRegisterAcceptsSixteenCharacterUsername(t *testing.T) {
+	router := NewRouter(newTestAuthService(), nil, testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON(
+		"/api/auth/register",
+		`{"username":"abcdefghijklmnop","password":"password123"}`,
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body = %s", response.Code, response.Body)
+	}
+}
+
+func TestRegisterRejectsSeventeenCharacterUsername(t *testing.T) {
+	router := NewRouter(newTestAuthService(), nil, testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON(
+		"/api/auth/register",
+		`{"username":"abcdefghijklmnopq","password":"password123"}`,
+	))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
+		t.Fatalf("register response = %d %s, want invalid_username", response.Code, response.Body)
+	}
+}
+
 func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
 	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
