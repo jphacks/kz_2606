@@ -7,3 +7,12 @@ export interface User {
   id: number;
   username: string;
 }
+
+export interface Room {
+  id: number;
+  code: string;
+  title: string;
+  ownerMemberId: number;
+  isPrivate: boolean;
+  closedAt: string | null;
+}
