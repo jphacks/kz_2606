@@ -15,6 +15,7 @@ type roomDTO struct {
 	Code          string     `json:"code"`
 	Title         string     `json:"title"`
 	OwnerMemberID int64      `json:"ownerMemberId"`
+	IsPrivate     bool       `json:"isPrivate"`
 	ClosedAt      *time.Time `json:"closedAt"`
 }
 
@@ -98,6 +99,7 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			Code:          snapshot.Room.Code,
 			Title:         snapshot.Room.Title,
 			OwnerMemberID: snapshot.Room.OwnerMemberID,
+			IsPrivate:     snapshot.Room.IsPrivate,
 			ClosedAt:      snapshot.Room.ClosedAt,
 		},
 		You: youDTO{

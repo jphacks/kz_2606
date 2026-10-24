@@ -127,7 +127,13 @@ func (r *testRoomRepository) Create(_ context.Context, owner domain.User, code, 
 	}
 	r.nextRoomID++
 	r.nextMemID++
-	room := domain.Room{ID: r.nextRoomID, Code: code, Title: title, OwnerMemberID: r.nextMemID}
+	room := domain.Room{
+		ID:            r.nextRoomID,
+		Code:          code,
+		Title:         title,
+		OwnerUserID:   owner.ID,
+		OwnerMemberID: r.nextMemID,
+	}
 	member := domain.Member{ID: r.nextMemID, DisplayName: owner.Username, Color: domain.FirstMemberColor}
 	r.rooms[code] = room
 	r.members[code] = map[int64]domain.Member{owner.ID: member}
@@ -147,6 +153,9 @@ func (r *testRoomRepository) Snapshot(_ context.Context, code string, userID int
 	room, exists := r.rooms[code]
 	if !exists {
 		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrRoomNotFound
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrPrivateRoom
 	}
 	you, exists := r.members[code][userID]
 	if !exists {
@@ -177,6 +186,9 @@ func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, 
 	room, exists := r.rooms[code]
 	if !exists {
 		return domain.Room{}, domain.Member{}, domain.ErrRoomNotFound
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.Room{}, domain.Member{}, domain.ErrPrivateRoom
 	}
 	if member, exists := r.members[code][userID]; exists {
 		if member.BannedAt != nil {
@@ -338,6 +350,48 @@ func TestCreateRoomPersistsRoomAndOwnerMember(t *testing.T) {
 		!strings.Contains(get.Body.String(), `"title":"公園を歩こう"`) ||
 		!strings.Contains(get.Body.String(), `"ownerMemberId":`) {
 		t.Fatalf("get room response = %d %s", get.Code, get.Body)
+	}
+}
+
+func TestPrivateRoomRejectsOtherMembers(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "owner_1")
+	owner := domain.User{ID: 1, Username: "owner_1"}
+	room, _, err := repository.Create(context.Background(), owner, "PRAV23", "owner_1のルーム")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room.IsPrivate = true
+	repository.rooms[room.Code] = room
+
+	otherCookie := registerTestUser(t, router, "other_1")
+	response := requestWithCookie(
+		router,
+		postJSON("/api/rooms/"+room.Code+"/join", `{"displayName":"other","color":"#abcdef"}`),
+		otherCookie,
+	)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"private_room"`) {
+		t.Fatalf("private room join = %d %s; want private_room 403", response.Code, response.Body)
+	}
+	if len(repository.members[room.Code]) != 1 {
+		t.Fatalf("private room member count = %d; want owner only", len(repository.members[room.Code]))
+	}
+}
+
+func TestGetPrivateRoomHidesItsExistence(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "owner_1")
+	room, _, err := repository.Create(context.Background(), domain.User{ID: 1, Username: "owner_1"}, "PRAV23", "owner_1のルーム")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room.IsPrivate = true
+	repository.rooms[room.Code] = room
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code, nil))
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"room_not_found"`) {
+		t.Fatalf("get private room = %d %s; want room_not_found 404", response.Code, response.Body)
 	}
 }
 
