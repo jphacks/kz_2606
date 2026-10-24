@@ -1,10 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
+import Auth from './ui/Auth';
 
 
 export default function App() {
+  const path = window.location.pathname;
+
+  if (path === '/login' || path === '/signin') {
+    return <Auth />;
+  }
+
+  return <MainExperience />;
+}
+
+function MainExperience() {
   // 現在どの画面にいるかを管理 ("home" または "before_record")
   const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record'>('home');
   
@@ -61,16 +72,16 @@ export default function App() {
             <Home />
             {/* 🗺️ マップ画面へ進むボタンを復活 */}
             <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
-              <button 
+              <button
                 onClick={() => setCurrentScreen('before_record')}
-                style={{ 
+                style={{
                   width: '100%',
-                  padding: '14px 20px', 
-                  background: '#0E7861', 
-                  color: 'white', 
-                  border: 'none', 
-                  borderRadius: '12px', 
-                  cursor: 'pointer', 
+                  padding: '14px 20px',
+                  background: '#0E7861',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  cursor: 'pointer',
                   fontWeight: 'bold',
                   fontSize: '15px',
                   boxShadow: '0 4px 6px rgba(14, 120, 97, 0.2)'

@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { Footprints, ArrowRight } from 'lucide-react';
 
-export default function Login() {
+interface LoginProps {
+  onNavigateToRegister?: () => void;
+  onStartWithoutAuth?: () => void;
+}
+
+export default function Login({ onNavigateToRegister, onStartWithoutAuth }: LoginProps) {
   const [accountName, setAccountName] = useState('');
   const [password, setPassword] = useState('');
 
@@ -42,8 +47,7 @@ export default function Login() {
 
         {/* マッププレースホルダー画像エリア */}
         <div className="mb-6 rounded-2xl overflow-hidden shadow-md border border-[#E2EBDD] bg-[#E8F0E5] h-44 relative flex items-center justify-center">
-          {/* 画像部分（空けておくエリア） */}
-          <div className="absolute inset-0 bg-linear-to-br from-[#E2EBDD]/50 to-[#D4E4D0]/50 flex items-center justify-center text-[#7A9A88] text-xs font-medium">
+          <div className="absolute inset-0 bg-gradient-to-br from-[#E2EBDD]/50 to-[#D4E4D0]/50 flex items-center justify-center text-[#7A9A88] text-xs font-medium">
             Map Preview Area
           </div>
         </div>
@@ -98,13 +102,14 @@ export default function Login() {
               type="submit"
               className="w-full mt-2 bg-[#0F5A40] hover:bg-[#0C4A34] text-white font-medium py-3.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
-              <span>ログイン</span>
               <ArrowRight className="w-4 h-4" />
+              <span>ログイン</span>
             </button>
 
             {/* ログインせずにはじめるボタン */}
             <button
               type="button"
+              onClick={onStartWithoutAuth}
               className="w-full bg-white hover:bg-[#F4F7F2] text-[#0F5A40] border border-[#0F5A40]/30 font-medium py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
               <Footprints className="w-4 h-4 -rotate-45" />
@@ -125,7 +130,10 @@ export default function Login() {
           <p className="text-xs text-[#556B5D] mb-4">
             アカウントを作成して、歩いた記録を保存しよう。
           </p>
-          <button className="w-full bg-white hover:bg-[#F9FBF8] text-[#0F5A40] border border-[#D4E4D0] font-medium py-3 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer">
+          <button
+            onClick={onNavigateToRegister}
+            className="w-full bg-white hover:bg-[#F9FBF8] text-[#0F5A40] border border-[#D4E4D0] font-medium py-3 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+          >
             <Footprints className="w-4 h-4 -rotate-45" />
             <span>新規登録へ</span>
           </button>
