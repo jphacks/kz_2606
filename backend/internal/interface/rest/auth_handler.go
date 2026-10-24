@@ -47,7 +47,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrInvalidUsername):
-			writeAPIError(w, http.StatusBadRequest, "invalid_username", "ユーザー名は3〜20文字の英数字と _ で入力してください")
+			writeAPIError(w, http.StatusBadRequest, "invalid_username", "ユーザー名は3〜16文字の英数字と _ で入力してください")
 		case errors.Is(err, domain.ErrInvalidPassword):
 			writeAPIError(w, http.StatusBadRequest, "invalid_password", "パスワードは8〜72バイトで入力してください")
 		case errors.Is(err, domain.ErrUsernameTaken):

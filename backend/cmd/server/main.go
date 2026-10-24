@@ -52,10 +52,15 @@ func run() error {
 		auth.Hasher{},
 		sessionCodec,
 	)
-	mux := rest.NewRouter(authService, rest.CookieOptions{
-		Secure:   cfg.CookieSecure,
-		Lifetime: auth.SessionLifetime,
-	})
+	roomService := usecase.NewRoomService(persistence.NewRoomRepository(pool))
+	mux := rest.NewRouter(
+		authService,
+		roomService,
+		rest.CookieOptions{
+			Secure:   cfg.CookieSecure,
+			Lifetime: auth.SessionLifetime,
+		},
+	)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

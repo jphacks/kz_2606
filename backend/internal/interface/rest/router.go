@@ -17,13 +17,17 @@ type CookieOptions struct {
 	Lifetime time.Duration
 }
 
-func NewRouter(authService *usecase.AuthService, cookies CookieOptions) *http.ServeMux {
+func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomService, cookies CookieOptions) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", rootHandler)
 	handler := &authHandler{service: authService, cookies: cookies}
+	rooms := &roomHandler{auth: authService, rooms: roomService}
 	mux.HandleFunc("POST /api/auth/register", handler.register)
 	mux.HandleFunc("POST /api/auth/login", handler.login)
 	mux.HandleFunc("POST /api/auth/logout", handler.logout)
 	mux.HandleFunc("GET /api/auth/me", handler.me)
+	mux.HandleFunc("POST /api/rooms", rooms.create)
+	mux.HandleFunc("GET /api/rooms/{code}", rooms.get)
+	mux.HandleFunc("POST /api/rooms/{code}/join", rooms.join)
 	return mux
 }
