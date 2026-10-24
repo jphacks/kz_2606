@@ -1,8 +1,36 @@
-import { useState } from 'react';
-import { Waypoints, Footprints, Flag, Link as LinkIcon, Plus, X, History } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, Scan } from 'lucide-react';
+import QRCode from 'qrcode';
 
 export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [inviteQrCode, setInviteQrCode] = useState<string | null>(null);
+  const [qrCodeError, setQrCodeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      setInviteQrCode(null);
+      setQrCodeError(null);
+      return;
+    }
+
+    let cancelled = false;
+    QRCode.toDataURL(window.location.href, { width: 192, margin: 1 })
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setInviteQrCode(dataUrl);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setQrCodeError(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen]);
 
   return (
     <div
@@ -144,32 +172,36 @@ export default function Home() {
 
           <div>
             <h3 className="font-bold text-gray-900 mb-3">招待された方はこちら</h3>
-            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0E7861] transition">
-              <LinkIcon size={20} className="text-gray-400 mr-3" />
-              <input 
-                type="text" 
-                placeholder="招待URLを貼り付け" 
-                className="w-full outline-none text-gray-800 placeholder-gray-400 bg-transparent"
-                tabIndex={isModalOpen ? 0 : -1}
-              />
-              <button 
-                className="text-[#0E7861] text-sm font-bold whitespace-nowrap ml-2"
-                tabIndex={isModalOpen ? 0 : -1}
-              >
-                貼り付け
-              </button>
+
+            {/* QRコード表示エリアのカード[cite: 2] */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-3 shadow-sm flex flex-col items-center justify-center text-center">
+              {inviteQrCode ? (
+                <img
+                  src={inviteQrCode}
+                  alt="招待用QRコード"
+                  className="w-48 h-48 mb-3"
+                />
+              ) : qrCodeError ? (
+                <p role="alert" className="text-sm text-red-600 mb-3">
+                  QRコードを生成できませんでした: {qrCodeError}
+                </p>
+              ) : (
+                <div className="w-48 h-48 mb-3 flex items-center justify-center text-[#0E7861]">
+                  <QrCode size={40} aria-hidden="true" />
+                </div>
+              )}
+              <p className="text-xs text-gray-500">QRコードをカメラに向けてください</p>
             </div>
+
+            {/* QRコードをスキャンボタン[cite: 2] */}
             <button 
-              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition"
+              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition shadow-sm"
               tabIndex={isModalOpen ? 0 : -1}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14"></path>
-                <path d="m12 5 7 7-7 7"></path>
-              </svg>
-              招待URLから参加
+              <Scan size={20} />
+              QRコードをスキャン
             </button>
-            <p className="text-xs text-gray-400 mt-4 text-center">届いた招待リンクを直接開いても参加できます</p>
+            <p className="text-xs text-gray-400 mt-4 text-center">チームリーダーが表示するQRコードを読み取って参加できます。</p>
           </div>
         </div>
       </div>
