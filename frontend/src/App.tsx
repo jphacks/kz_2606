@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
-import Auth from './ui/signin';
+import Auth from './ui/Auth';
 
 
 export default function App() {
