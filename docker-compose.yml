@@ -1,0 +1,20 @@
+# Postgres だけ。Go と Vite はネイティブに動かした方がリロードが速い。
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gpsart
+      POSTGRES_PASSWORD: gpsart
+      POSTGRES_DB: gpsart
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpsart"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

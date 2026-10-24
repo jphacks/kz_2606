@@ -1,0 +1,21 @@
+# Named Tunnel の設定例（TECH_PLAN.md 8章）
+# ~/.cloudflared/config.yml にコピーして TUNNEL_ID と hostname を書き換える。
+#
+#   cloudflared tunnel login
+#   cloudflared tunnel create gpsart-<自分の名前>
+#   cloudflared tunnel route dns gpsart-<自分の名前> <自分の名前>.dev.example.com
+#   cloudflared tunnel run gpsart-<自分の名前>
+#
+# クイックトンネル（trycloudflare.com）は再起動ごとにURLが変わるので、
+# スマホ実機確認を繰り返す開発ではこちらを使う。
+
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /home/lemonade/.cloudflared/00000000-0000-0000-0000-000000000000.json
+
+ingress:
+  # Go サーバー（フロントを埋め込んだ単一オリジン）に向ける
+  # WebSocket は追加設定なしでそのまま通る
+  - hostname: taro.dev.example.com
+    service: http://localhost:8080
+
+  - service: http_status:404

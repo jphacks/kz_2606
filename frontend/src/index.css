@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0b0f14;
+  color: #e6edf3;
+  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
+  /* スマホで地図を触ったときにページ全体が引っぱられないように */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#root {
+  height: 100dvh;
+}
+
+.leaflet-container {
+  background: #0b0f14;
+  font-family: inherit;
+}
+
+/* 暗い地図に合わせる */
+.leaflet-control-attribution {
+  background: rgba(11, 15, 20, 0.7) !important;
+  color: #7d8590 !important;
+}
+.leaflet-control-attribution a {
+  color: #9aa7b2 !important;
+}
