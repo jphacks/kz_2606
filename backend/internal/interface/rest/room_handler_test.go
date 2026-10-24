@@ -18,6 +18,7 @@ import (
 type testRoomRepository struct {
 	rooms             map[string]domain.Room
 	members           map[string]map[int64]domain.Member
+	ownerUserIDs      map[string]int64
 	routes            map[string]map[int64]int64
 	activeRoutes      map[string]map[int64]bool
 	nextRoomID        int64
@@ -109,6 +110,7 @@ func newTestRoomRepository() *testRoomRepository {
 	return &testRoomRepository{
 		rooms:        make(map[string]domain.Room),
 		members:      make(map[string]map[int64]domain.Member),
+		ownerUserIDs: make(map[string]int64),
 		routes:       make(map[string]map[int64]int64),
 		activeRoutes: make(map[string]map[int64]bool),
 	}
@@ -129,6 +131,7 @@ func (r *testRoomRepository) Create(_ context.Context, owner domain.User, code, 
 	member := domain.Member{ID: r.nextMemID, DisplayName: owner.Username, Color: domain.FirstMemberColor}
 	r.rooms[code] = room
 	r.members[code] = map[int64]domain.Member{owner.ID: member}
+	r.ownerUserIDs[code] = owner.ID
 	return room, member, nil
 }
 
@@ -162,7 +165,7 @@ func (r *testRoomRepository) Close(_ context.Context, code string, userID int64)
 	if !ok {
 		return time.Time{}, domain.ErrRoomNotFound
 	}
-	if userID != room.OwnerMemberID {
+	if userID != r.ownerUserIDs[code] {
 		return time.Time{}, domain.ErrForbidden
 	}
 	if room.ClosedAt == nil {
@@ -181,7 +184,7 @@ func (r *testRoomRepository) Reopen(_ context.Context, code string, userID int64
 	if !ok {
 		return domain.ErrRoomNotFound
 	}
-	if userID != room.OwnerMemberID {
+	if userID != r.ownerUserIDs[code] {
 		return domain.ErrForbidden
 	}
 	room.ClosedAt = nil
@@ -198,18 +201,18 @@ func (r *testRoomRepository) Unban(_ context.Context, code string, userID, membe
 }
 
 func (r *testRoomRepository) setBanned(code string, userID, memberID int64, banned bool) error {
-	room, ok := r.rooms[code]
+	_, ok := r.rooms[code]
 	if !ok {
 		return domain.ErrRoomNotFound
 	}
-	if userID != room.OwnerMemberID {
+	if userID != r.ownerUserIDs[code] {
 		return domain.ErrForbidden
 	}
-	for _, member := range r.members[code] {
+	for memberUserID, member := range r.members[code] {
 		if member.ID != memberID {
 			continue
 		}
-		if member.ID == room.OwnerMemberID {
+		if memberUserID == r.ownerUserIDs[code] {
 			return domain.ErrCannotBanOwner
 		}
 		if banned {
@@ -218,18 +221,14 @@ func (r *testRoomRepository) setBanned(code string, userID, memberID int64, bann
 		} else {
 			member.BannedAt = nil
 		}
-		for userID, current := range r.members[code] {
-			if current.ID == memberID {
-				r.members[code][userID] = member
-				return nil
-			}
-		}
+		r.members[code][memberUserID] = member
+		return nil
 	}
 	return domain.ErrMemberNotFound
 }
 
 func (r *testRoomRepository) DeleteRoute(_ context.Context, code string, userID, routeID int64) error {
-	room, ok := r.rooms[code]
+	_, ok := r.rooms[code]
 	if !ok {
 		return domain.ErrRoomNotFound
 	}
@@ -237,7 +236,7 @@ func (r *testRoomRepository) DeleteRoute(_ context.Context, code string, userID,
 	if !ok {
 		return domain.ErrRouteNotFound
 	}
-	if userID != room.OwnerMemberID && userID != routeUserID {
+	if userID != r.ownerUserIDs[code] && userID != routeUserID {
 		return domain.ErrForbidden
 	}
 	delete(r.routes[code], routeID)

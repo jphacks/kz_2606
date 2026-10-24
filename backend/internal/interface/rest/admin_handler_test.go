@@ -18,11 +18,14 @@ type adminTestRoom struct {
 	member      *http.Cookie
 	memberID    int64
 	ownerMember int64
+	memberUser  int64
+	ownerUser   int64
 }
 
 func setupAdminTestRoom(t *testing.T) adminTestRoom {
 	t.Helper()
 	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "unrelated_1")
 	ownerCookie := registerTestUser(t, router, "owner_1")
 	create := requestWithCookie(router, postJSON("/api/rooms", `{"title":"admin test"}`), ownerCookie)
 	if create.Code != http.StatusOK {
@@ -49,6 +52,11 @@ func setupAdminTestRoom(t *testing.T) adminTestRoom {
 	if err := json.Unmarshal(join.Body.Bytes(), &joined); err != nil {
 		t.Fatal(err)
 	}
+	ownerUserID := repository.ownerUserIDs[created.Room.Code]
+	memberUserID := findTestMemberUserID(repository, created.Room.Code, joined.Member.ID)
+	if ownerUserID == created.Room.OwnerMemberID || memberUserID == joined.Member.ID {
+		t.Fatal("test setup must use distinct user and member IDs")
+	}
 	return adminTestRoom{
 		router:      router,
 		repository:  repository,
@@ -57,7 +65,18 @@ func setupAdminTestRoom(t *testing.T) adminTestRoom {
 		member:      memberCookie,
 		memberID:    joined.Member.ID,
 		ownerMember: created.Room.OwnerMemberID,
+		ownerUser:   ownerUserID,
+		memberUser:  memberUserID,
 	}
+}
+
+func findTestMemberUserID(repository *testRoomRepository, code string, memberID int64) int64 {
+	for userID, member := range repository.members[code] {
+		if member.ID == memberID {
+			return userID
+		}
+	}
+	return 0
 }
 
 func TestAdminCloseAndReopenRoom(t *testing.T) {
@@ -114,11 +133,11 @@ func TestAdminBanAndUnbanMember(t *testing.T) {
 
 	banPath := basePath + strconv.FormatInt(testRoom.memberID, 10) + "/ban"
 	banned := requestWithCookie(testRoom.router, httptest.NewRequest(http.MethodPost, banPath, nil), testRoom.owner)
-	if banned.Code != http.StatusNoContent || testRoom.repository.members[testRoom.code][2].BannedAt == nil {
+	if banned.Code != http.StatusNoContent || testRoom.repository.members[testRoom.code][testRoom.memberUser].BannedAt == nil {
 		t.Fatalf("ban response = %d %s", banned.Code, banned.Body)
 	}
 	unbanned := requestWithCookie(testRoom.router, httptest.NewRequest(http.MethodDelete, banPath, nil), testRoom.owner)
-	if unbanned.Code != http.StatusNoContent || testRoom.repository.members[testRoom.code][2].BannedAt != nil {
+	if unbanned.Code != http.StatusNoContent || testRoom.repository.members[testRoom.code][testRoom.memberUser].BannedAt != nil {
 		t.Fatalf("unban response = %d %s", unbanned.Code, unbanned.Body)
 	}
 
@@ -135,7 +154,7 @@ func TestAdminBanAndUnbanMember(t *testing.T) {
 
 func TestAdminDeleteRouteAllowsOwnerOrRouteOwner(t *testing.T) {
 	testRoom := setupAdminTestRoom(t)
-	testRoom.repository.routes[testRoom.code] = map[int64]int64{41: 2, 42: 1}
+	testRoom.repository.routes[testRoom.code] = map[int64]int64{41: testRoom.memberUser, 42: testRoom.ownerUser}
 	testRoom.repository.activeRoutes[testRoom.code] = map[int64]bool{41: false, 42: false}
 	path := "/api/rooms/" + testRoom.code + "/routes/"
 	stranger := registerTestUser(t, testRoom.router, "stranger_1")
