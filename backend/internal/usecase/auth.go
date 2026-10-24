@@ -7,6 +7,8 @@ import (
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
 
+const maxPersonalRoomCodeAttempts = 5
+
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrPasswordMismatch   = errors.New("password mismatch")
@@ -15,6 +17,7 @@ var (
 
 type AuthResult struct {
 	User  domain.User
+	Room  domain.Room
 	Token string
 }
 
@@ -41,15 +44,33 @@ func (s *AuthService) Register(ctx context.Context, username, password string) (
 	if err != nil {
 		return AuthResult{}, err
 	}
-	user, err := s.users.Create(ctx, normalizedUsername, passwordHash)
-	if err != nil {
-		return AuthResult{}, err
+	title := normalizedUsername + "のルーム"
+	var user domain.User
+	var room domain.Room
+	created := false
+	for range maxPersonalRoomCodeAttempts {
+		code, err := domain.NewRoomCode()
+		if err != nil {
+			return AuthResult{}, err
+		}
+		user, room, _, err = s.users.CreateWithPersonalRoom(ctx, normalizedUsername, passwordHash, code, title)
+		if errors.Is(err, domain.ErrRoomCodeTaken) {
+			continue
+		}
+		if err != nil {
+			return AuthResult{}, err
+		}
+		created = true
+		break
+	}
+	if !created {
+		return AuthResult{}, errors.New("could not allocate a unique room code")
 	}
 	token, err := s.sessions.Encode(user.ID)
 	if err != nil {
 		return AuthResult{}, err
 	}
-	return AuthResult{User: user, Token: token}, nil
+	return AuthResult{User: user, Room: room, Token: token}, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (AuthResult, error) {

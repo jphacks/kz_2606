@@ -107,9 +107,12 @@ CREATE TABLE IF NOT EXISTS rooms (
     code          TEXT NOT NULL UNIQUE,   -- 6文字。共有するのはこれ
     title         TEXT NOT NULL,
     owner_user_id BIGINT NOT NULL REFERENCES users (id),
+    is_private    BOOLEAN NOT NULL DEFAULT false,
     closed_at     TIMESTAMPTZ,            -- NULL = 進行中
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS members (
     id           BIGSERIAL PRIMARY KEY,
@@ -184,7 +187,7 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 
 | メソッド・パス | リクエスト | 成功 | エラー |
 |---|---|---|---|
-| `POST /api/auth/register` | `{username, password}` | `200 {user}` + Cookie | `400 invalid_username` / `400 invalid_password` / `409 username_taken` |
+| `POST /api/auth/register` | `{username, password}` | `200 {user, room}` + Cookie | `400 invalid_username` / `400 invalid_password` / `409 username_taken` |
 | `POST /api/auth/login` | `{username, password}` | `200 {user}` + Cookie | `400 invalid_format` / **`401 invalid_credentials`** |
 | `POST /api/auth/logout` | — | `204` | — |
 | `GET /api/auth/me` | — | `200 {user}` | `401 unauthorized` |
@@ -194,7 +197,9 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 
 ```json
 // user の形
-{"user": {"id": 1, "username": "taro"}}
+{"user": {"id": 1, "username": "taro"},
+ "room": {"id": 7, "code": "KZ26AB", "title": "taroのルーム",
+          "ownerMemberId": 1, "isPrivate": true, "closedAt": null}}
 ```
 
 > **`invalid_credentials` は統一する。** 「ユーザーが存在しない」と「パスワードが違う」を
@@ -202,6 +207,10 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 
 > **登録成功時にそのままログインさせる**（Cookie を返す）。
 > 分けるとユーザーがパスワードを2回打つことになる。
+
+> **アカウント登録時に個人ルームを作る。** タイトルは `{username}のルーム`、
+> owner と member は登録した本人だけ。`is_private` により他ユーザーのjoinと
+> WebSocket接続を拒否する。通常の `POST /api/rooms` で作るルームは公開のまま。
 
 > **`GET /api/auth/me` はフロントの起動時に必ず叩く。**
 > これが無いとリロードでログイン状態が消える（Cookieは残っているのに自分が誰か分からない）。
@@ -222,16 +231,17 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 |---|---|---|---|
 | `POST /api/rooms` | `{title}` | `200 {room}` | `401 unauthorized` / `400 invalid_title` |
 | `GET /api/rooms/{code}` | — | `200 {room}` | `404 room_not_found` |
-| `POST /api/rooms/{code}/join` | `{displayName, color}` | `200 {member, room}` | `401` / `404` / `400 invalid_color` / `403 banned` / `400 invalid_display_name` |
+| `POST /api/rooms/{code}/join` | `{displayName, color}` | `200 {member, room}` | `401` / `404` / `400 invalid_color` / `403 banned` / `403 private_room` / `400 invalid_display_name` |
 
 ```json
 // room の形
 {"room": {"id": 7, "code": "KZ26AB", "title": "大通公園に絵を描く",
-          "ownerMemberId": 1, "closedAt": null}}
+          "ownerMemberId": 1, "isPrivate": false, "closedAt": null}}
 ```
 
 - `POST /api/rooms` は**レスポンスに `code` を含める**。作成者は即QRを出す必要がある
 - 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭）
+- 個人ルームは `isPrivate: true`。本人以外のjoinおよびWS接続を拒否する
 - `GET /api/rooms/{code}` は存在確認だけ。**軌跡は返さない**（それは `snapshot` の仕事）
 - `POST .../join` は**冪等**。すでに参加済みなら既存の member を返す
 - `title` は前後の空白を除いて1〜40文字 / `displayName` は前後の空白を除いて1〜16文字
@@ -316,7 +326,7 @@ GET /ws?room=KZ26AB
   "t": "snapshot",
   "room": {
     "id": 7, "code": "KZ26AB", "title": "大通公園に絵を描く",
-    "ownerMemberId": 1, "closedAt": null
+    "ownerMemberId": 1, "isPrivate": false, "closedAt": null
   },
   "you": { "id": 3, "displayName": "たろう", "color": "#ff2d78", "isOwner": false },
   "members": [

@@ -25,8 +25,8 @@ func (h *recordingHasher) DummyHash() string { return "hash:" }
 
 type emptyUsers struct{}
 
-func (emptyUsers) Create(context.Context, string, string) (domain.User, error) {
-	return domain.User{}, domain.ErrUsernameTaken
+func (emptyUsers) CreateWithPersonalRoom(context.Context, string, string, string, string) (domain.User, domain.Room, domain.Member, error) {
+	return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrUsernameTaken
 }
 
 func (emptyUsers) FindByUsername(context.Context, string) (domain.User, string, error) {

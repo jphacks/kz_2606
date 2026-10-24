@@ -29,6 +29,7 @@ type roomResponse struct {
 	Code          string     `json:"code"`
 	Title         string     `json:"title"`
 	OwnerMemberID int64      `json:"ownerMemberId"`
+	IsPrivate     bool       `json:"isPrivate"`
 	ClosedAt      *time.Time `json:"closedAt"`
 }
 
@@ -98,6 +99,8 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_color", "色は #rrggbb 形式で入力してください")
 		case errors.Is(err, domain.ErrMemberBanned):
 			writeAPIError(w, http.StatusForbidden, "banned", "この部屋への参加は禁止されています")
+		case errors.Is(err, domain.ErrPrivateRoom):
+			writeAPIError(w, http.StatusForbidden, "private_room", "この部屋には参加できません")
 		case errors.Is(err, domain.ErrRoomNotFound), errors.Is(err, domain.ErrInvalidRoomCode):
 			writeAPIError(w, http.StatusNotFound, "room_not_found", "部屋が見つかりません")
 		default:
@@ -121,6 +124,7 @@ func toRoomResponse(room domain.Room) roomResponse {
 		Code:          room.Code,
 		Title:         room.Title,
 		OwnerMemberID: room.OwnerMemberID,
+		IsPrivate:     room.IsPrivate,
 		ClosedAt:      room.ClosedAt,
 	}
 }

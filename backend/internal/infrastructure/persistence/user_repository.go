@@ -18,23 +18,56 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-func (r *UserRepository) Create(ctx context.Context, username, passwordHash string) (domain.User, error) {
+func (r *UserRepository) CreateWithPersonalRoom(
+	ctx context.Context,
+	username, passwordHash, roomCode, roomTitle string,
+) (domain.User, domain.Room, domain.Member, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
 	var user domain.User
-	err := r.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash)
 		VALUES ($1, $2)
 		RETURNING id, username, created_at
 	`, username, passwordHash).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		// 23505 = unique_violation。users に他の UNIQUE 制約は無いので制約名は見ない
-		// （DDL の書き方で自動生成名が変わると 409 が 500 に化けるため）。
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return domain.User{}, domain.ErrUsernameTaken
+			return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrUsernameTaken
 		}
-		return domain.User{}, err
+		return domain.User{}, domain.Room{}, domain.Member{}, err
 	}
-	return user, nil
+
+	var room domain.Room
+	err = tx.QueryRow(ctx, `
+		INSERT INTO rooms (code, title, owner_user_id, is_private)
+		VALUES ($1, $2, $3, TRUE)
+		RETURNING id, code, title, is_private
+	`, roomCode, roomTitle, user.ID).Scan(&room.ID, &room.Code, &room.Title, &room.IsPrivate)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "rooms_code_key" {
+			return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+		}
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerUserID = user.ID
+
+	member, err := insertMember(ctx, tx, room.ID, user.ID, user.Username, domain.FirstMemberColor)
+	if err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerMemberID = member.ID
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	return user, room, member, nil
 }
 
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (domain.User, string, error) {

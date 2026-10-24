@@ -16,27 +16,73 @@ import (
 )
 
 type testUsers struct {
-	users  map[string]domain.User
-	hashes map[string]string
-	nextID int64
+	users             map[string]domain.User
+	hashes            map[string]string
+	rooms             map[string]domain.Room
+	members           map[string][]domain.Member
+	nextID            int64
+	codeConflictsLeft int
 }
 
 func newTestAuthService() *usecase.AuthService {
 	return usecase.NewAuthService(&testUsers{
-		users:  make(map[string]domain.User),
-		hashes: make(map[string]string),
+		users:   make(map[string]domain.User),
+		hashes:  make(map[string]string),
+		rooms:   make(map[string]domain.Room),
+		members: make(map[string][]domain.Member),
 	}, testHasher{}, testSessions{})
 }
 
-func (r *testUsers) Create(_ context.Context, username, passwordHash string) (domain.User, error) {
+func (r *testUsers) CreateWithPersonalRoom(
+	_ context.Context,
+	username, passwordHash, roomCode, roomTitle string,
+) (domain.User, domain.Room, domain.Member, error) {
+	if r.codeConflictsLeft > 0 {
+		r.codeConflictsLeft--
+		return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+	}
 	if _, exists := r.users[username]; exists {
-		return domain.User{}, domain.ErrUsernameTaken
+		return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrUsernameTaken
+	}
+	if _, exists := r.rooms[roomCode]; exists {
+		return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
 	}
 	r.nextID++
 	user := domain.User{ID: r.nextID, Username: username, CreatedAt: time.Now()}
 	r.users[username] = user
 	r.hashes[username] = passwordHash
-	return user, nil
+	room := domain.Room{
+		ID:          user.ID,
+		Code:        roomCode,
+		Title:       roomTitle,
+		OwnerUserID: user.ID,
+		IsPrivate:   true,
+	}
+	member := domain.Member{
+		ID:          user.ID,
+		DisplayName: username,
+		Color:       domain.FirstMemberColor,
+	}
+	room.OwnerMemberID = member.ID
+	r.rooms[roomCode] = room
+	r.members[roomCode] = []domain.Member{member}
+	return user, room, member, nil
+}
+
+func TestRegisterRetriesPersonalRoomCodeCollision(t *testing.T) {
+	users := &testUsers{
+		users:             make(map[string]domain.User),
+		hashes:            make(map[string]string),
+		rooms:             make(map[string]domain.Room),
+		members:           make(map[string][]domain.Member),
+		codeConflictsLeft: 1,
+	}
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
+	if response.Code != http.StatusOK || len(users.rooms) != 1 || len(users.members) != 1 {
+		t.Fatalf("register response = %d %s; rooms=%d members=%d", response.Code, response.Body, len(users.rooms), len(users.members))
+	}
 }
 
 func (r *testUsers) FindByUsername(_ context.Context, username string) (domain.User, string, error) {
@@ -94,7 +140,13 @@ func postJSON(target, body string) *http.Request {
 }
 
 func TestAuthEndpoints(t *testing.T) {
-	router := NewRouter(newTestAuthService(), nil, testCookies)
+	users := &testUsers{
+		users:   make(map[string]domain.User),
+		hashes:  make(map[string]string),
+		rooms:   make(map[string]domain.Room),
+		members: make(map[string][]domain.Member),
+	}
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
 
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"Taro_1","password":"password123"}`))
@@ -102,13 +154,21 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Fatalf("register status = %d, body = %s", register.Code, register.Body)
 	}
 	var registered struct {
-		User apiUser `json:"user"`
+		User apiUser      `json:"user"`
+		Room roomResponse `json:"room"`
 	}
 	if err := json.Unmarshal(register.Body.Bytes(), &registered); err != nil {
 		t.Fatal(err)
 	}
 	if registered.User.Username != "taro_1" || registered.User.ID != 1 {
 		t.Fatalf("registered user = %+v", registered.User)
+	}
+	if registered.Room.Title != "taro_1のルーム" || !registered.Room.IsPrivate || registered.Room.OwnerMemberID == 0 {
+		t.Fatalf("registered room = %+v; want a private personal room", registered.Room)
+	}
+	createdMembers := users.members[registered.Room.Code]
+	if len(createdMembers) != 1 || createdMembers[0].ID != registered.Room.OwnerMemberID {
+		t.Fatalf("personal room members = %+v; want only its owner", createdMembers)
 	}
 	cookies := register.Result().Cookies()
 	if len(cookies) != 1 ||

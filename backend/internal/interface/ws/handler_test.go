@@ -18,8 +18,11 @@ import (
 
 type testUsers struct{}
 
-func (testUsers) Create(context.Context, string, string) (domain.User, error) {
-	return domain.User{}, nil
+func (testUsers) CreateWithPersonalRoom(
+	context.Context,
+	string, string, string, string,
+) (domain.User, domain.Room, domain.Member, error) {
+	return domain.User{}, domain.Room{}, domain.Member{}, nil
 }
 
 func (testUsers) FindByUsername(context.Context, string) (domain.User, string, error) {
@@ -174,6 +177,7 @@ func TestHandlerRejectsUnauthorizedAndNonMemberConnections(t *testing.T) {
 	for name, accessError := range map[string]error{
 		"not a member": domain.ErrMemberNotFound,
 		"banned":       domain.ErrMemberBanned,
+		"private room": domain.ErrPrivateRoom,
 	} {
 		t.Run(name, func(t *testing.T) {
 			handler := NewHandler(

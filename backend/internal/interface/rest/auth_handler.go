@@ -56,7 +56,13 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSessionCookie(w, result.Token, h.cookies)
-	writeUser(w, http.StatusOK, result.User)
+	writeJSON(w, http.StatusOK, struct {
+		User apiUser      `json:"user"`
+		Room roomResponse `json:"room"`
+	}{
+		User: apiUser{ID: result.User.ID, Username: result.User.Username},
+		Room: toRoomResponse(result.Room),
+	})
 }
 
 func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {

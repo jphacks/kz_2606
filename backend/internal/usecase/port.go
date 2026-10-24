@@ -7,7 +7,7 @@ import (
 )
 
 type UserRepository interface {
-	Create(ctx context.Context, username, passwordHash string) (domain.User, error)
+	CreateWithPersonalRoom(ctx context.Context, username, passwordHash, roomCode, roomTitle string) (domain.User, domain.Room, domain.Member, error)
 	FindByUsername(ctx context.Context, username string) (domain.User, string, error)
 	FindByID(ctx context.Context, id int64) (domain.User, error)
 }
