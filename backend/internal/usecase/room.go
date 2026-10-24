@@ -55,12 +55,13 @@ func (s *RoomService) Join(ctx context.Context, code string, userID int64, displ
 	if err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
-	if err := domain.ValidateDisplayName(displayName); err != nil {
+	normalizedDisplayName, err := domain.NormalizeDisplayName(displayName)
+	if err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
 	normalizedColor, err := domain.NormalizeColor(color)
 	if err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
-	return s.rooms.Join(ctx, normalizedCode, userID, displayName, normalizedColor)
+	return s.rooms.Join(ctx, normalizedCode, userID, normalizedDisplayName, normalizedColor)
 }

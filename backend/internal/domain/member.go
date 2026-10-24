@@ -25,11 +25,12 @@ type Member struct {
 	BannedAt    *time.Time
 }
 
-func ValidateDisplayName(displayName string) error {
-	if strings.TrimSpace(displayName) == "" || utf8.RuneCountInString(displayName) > 16 {
-		return ErrInvalidDisplayName
+func NormalizeDisplayName(displayName string) (string, error) {
+	displayName = strings.TrimSpace(displayName)
+	if utf8.RuneCountInString(displayName) < 1 || utf8.RuneCountInString(displayName) > 16 {
+		return "", ErrInvalidDisplayName
 	}
-	return nil
+	return displayName, nil
 }
 
 func NormalizeColor(color string) (string, error) {

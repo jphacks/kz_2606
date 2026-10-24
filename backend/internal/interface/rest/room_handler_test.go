@@ -24,6 +24,56 @@ type testRoomRepository struct {
 	codeConflictsLeft int
 }
 
+func TestJoinRoomTrimsDisplayNameBeforePersisting(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	ownerCookie := registerTestUser(t, router, "owner_1")
+	owner := requestWithCookie(router, postJSON("/api/rooms", `{"title":"park"}`), ownerCookie)
+	var created struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(owner.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	joinerCookie := registerTestUser(t, router, "joiner_1")
+	response := requestWithCookie(
+		router,
+		postJSON("/api/rooms/"+created.Room.Code+"/join", `{"displayName":"  walker  ","color":"#ffffff"}`),
+		joinerCookie,
+	)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"displayName":"walker"`) {
+		t.Fatalf("join response = %d %s, want trimmed display name", response.Code, response.Body)
+	}
+	if member := repository.members[created.Room.Code][2]; member.DisplayName != "walker" {
+		t.Fatalf("persisted display name = %q, want trimmed name", member.DisplayName)
+	}
+}
+
+func TestJoinRoomValidatesDisplayNameLengthAfterTrimming(t *testing.T) {
+	router, _ := newRoomTestRouter()
+	ownerCookie := registerTestUser(t, router, "owner_1")
+	owner := requestWithCookie(router, postJSON("/api/rooms", `{"title":"park"}`), ownerCookie)
+	var created struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(owner.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	joinerCookie := registerTestUser(t, router, "joiner_1")
+	displayName := strings.Repeat(" ", 15) + strings.Repeat("a", 17) + " "
+	body, err := json.Marshal(joinRoomRequest{DisplayName: displayName, Color: "#ffffff"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := requestWithCookie(
+		router,
+		postJSON("/api/rooms/"+created.Room.Code+"/join", string(body)),
+		joinerCookie,
+	)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_display_name"`) {
+		t.Fatalf("join response = %d %s, want invalid_display_name after trimming", response.Code, response.Body)
+	}
+}
+
 func TestJoinRoomAllowsClosedRoomForReadOnlyViewing(t *testing.T) {
 	router, repository := newRoomTestRouter()
 	ownerCookie := registerTestUser(t, router, "owner_1")
