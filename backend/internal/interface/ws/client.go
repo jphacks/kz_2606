@@ -18,13 +18,15 @@ const (
 )
 
 type client struct {
-	conn     *websocket.Conn
-	out      chan []byte
-	done     chan struct{}
-	registry *Registry
-	roomCode string
-	memberID int64
-	closeOne sync.Once
+	conn          *websocket.Conn
+	out           chan []byte
+	done          chan struct{}
+	closeAfter    chan struct{}
+	registry      *Registry
+	roomCode      string
+	memberID      int64
+	closeOne      sync.Once
+	closeAfterOne sync.Once
 }
 
 func (c *client) enqueue(message []byte) {
@@ -32,20 +34,37 @@ func (c *client) enqueue(message []byte) {
 	select {
 	case <-c.done:
 		return
+	case <-c.closeAfter:
+		return
 	default:
 	}
 	select {
 	case c.out <- message:
+	case <-c.done:
+	case <-c.closeAfter:
 	default:
 		slog.Warn("websocket send buffer full; disconnecting client", "room", c.roomCode, "member", c.memberID)
 		c.shutdown()
 	}
 }
 
+func (c *client) disconnectAfter(message []byte) {
+	c.enqueue(message)
+	if c.closeAfter == nil {
+		c.shutdown()
+		return
+	}
+	c.closeAfterOne.Do(func() {
+		close(c.closeAfter)
+	})
+}
+
 func (c *client) shutdown() {
 	c.closeOne.Do(func() {
 		close(c.done)
-		c.registry.Remove(c)
+		if c.registry.Remove(c) {
+			c.registry.BroadcastLeave(c.roomCode, c.memberID)
+		}
 		if err := c.conn.Close(); err != nil {
 			slog.Debug("close websocket connection failed", "err", err)
 		}
@@ -90,6 +109,17 @@ func (c *client) writePump(initial []byte) {
 		select {
 		case <-c.done:
 			return
+		case <-c.closeAfter:
+			for {
+				select {
+				case message := <-c.out:
+					if !c.writeMessage(message) {
+						return
+					}
+				default:
+					return
+				}
+			}
 		case message := <-c.out:
 			if !c.writeMessage(message) {
 				return

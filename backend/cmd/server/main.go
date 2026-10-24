@@ -54,6 +54,7 @@ func run() error {
 		sessionCodec,
 	)
 	roomService := usecase.NewRoomService(persistence.NewRoomRepository(pool))
+	wsRegistry := ws.NewRegistry()
 	mux := rest.NewRouter(
 		authService,
 		roomService,
@@ -61,8 +62,9 @@ func run() error {
 			Secure:   cfg.CookieSecure,
 			Lifetime: auth.SessionLifetime,
 		},
+		wsRegistry,
 	)
-	mux.Handle("/ws", ws.NewHandler(authService, roomService, ws.NewRegistry()))
+	mux.Handle("/ws", ws.NewHandler(authService, roomService, wsRegistry))
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

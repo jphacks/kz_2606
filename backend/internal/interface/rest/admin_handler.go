@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
 type adminHandler struct {
-	rooms *usecase.RoomService
+	rooms    *usecase.RoomService
+	registry *ws.Registry
 }
 
 func (h *adminHandler) close(w http.ResponseWriter, r *http.Request) {
@@ -20,10 +22,18 @@ func (h *adminHandler) close(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	closedAt, err := h.rooms.Close(r.Context(), r.PathValue("code"), user.ID)
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
+	if err != nil {
+		h.writeRoomError(w, err, "normalize room code before closing")
+		return
+	}
+	closedAt, ownerMemberID, changed, err := h.rooms.Close(r.Context(), code, user.ID)
 	if err != nil {
 		h.writeRoomError(w, err, "close room")
 		return
+	}
+	if changed {
+		h.registry.BroadcastClosed(code, closedAt, ownerMemberID)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		ClosedAt time.Time `json:"closedAt"`
@@ -35,9 +45,18 @@ func (h *adminHandler) reopen(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.rooms.Reopen(r.Context(), r.PathValue("code"), user.ID); err != nil {
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
+	if err != nil {
+		h.writeRoomError(w, err, "normalize room code before reopening")
+		return
+	}
+	ownerMemberID, changed, err := h.rooms.Reopen(r.Context(), code, user.ID)
+	if err != nil {
 		h.writeRoomError(w, err, "reopen room")
 		return
+	}
+	if changed {
+		h.registry.BroadcastReopened(code, ownerMemberID)
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -60,6 +79,11 @@ func (h *adminHandler) setBan(w http.ResponseWriter, r *http.Request, banned boo
 		writeAPIError(w, http.StatusNotFound, "member_not_found", "メンバーが見つかりません")
 		return
 	}
+	room, err := h.rooms.FindByCode(r.Context(), r.PathValue("code"))
+	if err != nil {
+		h.writeRoomError(w, err, "load room before changing member ban status")
+		return
+	}
 	if banned {
 		err = h.rooms.Ban(r.Context(), r.PathValue("code"), user.ID, memberID)
 	} else {
@@ -68,6 +92,11 @@ func (h *adminHandler) setBan(w http.ResponseWriter, r *http.Request, banned boo
 	if err != nil {
 		h.writeMemberError(w, err, "change member ban status")
 		return
+	}
+	if banned {
+		h.registry.BroadcastBanned(room.Code, memberID, room.OwnerMemberID)
+	} else {
+		h.registry.BroadcastUnbanned(room.Code, memberID, room.OwnerMemberID)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -82,10 +111,16 @@ func (h *adminHandler) deleteRoute(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusNotFound, "route_not_found", "記録が見つかりません")
 		return
 	}
-	if err := h.rooms.DeleteRoute(r.Context(), r.PathValue("code"), user.ID, routeID); err != nil {
+	code, err := domain.NormalizeRoomCode(r.PathValue("code"))
+	if err != nil {
+		h.writeRouteError(w, err, "normalize room code before deleting route")
+		return
+	}
+	if err := h.rooms.DeleteRoute(r.Context(), code, user.ID, routeID); err != nil {
 		h.writeRouteError(w, err, "delete route")
 		return
 	}
+	h.registry.BroadcastRouteDeleted(code, routeID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
