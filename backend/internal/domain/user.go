@@ -1,7 +1,42 @@
 package domain
 
-// User エンティティと Username 値オブジェクト。
-// username は 3〜20文字 [a-z0-9_]、小文字に正規化して保存する。
-// パスワードの平文はここに置かない（ハッシュ化は infrastructure/auth）。
-//
-// TODO: User{ID, Username, CreatedAt} / ParseUsername / ValidatePassword
+import (
+	"errors"
+	"strings"
+	"time"
+)
+
+var (
+	ErrInvalidUsername = errors.New("invalid username")
+	ErrInvalidPassword = errors.New("invalid password")
+	ErrUsernameTaken   = errors.New("username already taken")
+	ErrUserNotFound    = errors.New("user not found")
+)
+
+type User struct {
+	ID        int64
+	Username  string
+	CreatedAt time.Time
+}
+
+func ParseUsername(value string) (string, error) {
+	if len(value) < 3 || len(value) > 20 {
+		return "", ErrInvalidUsername
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') &&
+			(char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') &&
+			char != '_' {
+			return "", ErrInvalidUsername
+		}
+	}
+	return strings.ToLower(value), nil
+}
+
+func ValidatePassword(password string) error {
+	if len(password) < 8 || len(password) > 72 {
+		return ErrInvalidPassword
+	}
+	return nil
+}

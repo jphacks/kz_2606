@@ -1,6 +1,26 @@
 package auth
 
-// usecase.PasswordHasher の実装。golang.org/x/crypto/bcrypt、コストは既定(10)。
-// 意図的に遅い（約70ms）ので、テストでは必ずダミーに差し替える。
-//
-// TODO: Hasher / Hash / Compare
+import (
+	"errors"
+
+	"github.com/jphacks/kz_2606/backend/internal/usecase"
+	"golang.org/x/crypto/bcrypt"
+)
+
+type Hasher struct{}
+
+func (Hasher) Hash(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func (Hasher) Compare(passwordHash, password string) error {
+	err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+		return usecase.ErrPasswordMismatch
+	}
+	return err
+}
