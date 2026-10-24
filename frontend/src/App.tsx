@@ -4,14 +4,11 @@ import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
-import Auth from './ui/Auth';
+import Login from './ui/login';     // login.tsxをインポート
+import Register from './ui/signin'; // signin.tsxをインポート
 
 export default function App() {
   const path = window.location.pathname;
-
-  if (path === '/login' || path === '/signin') {
-    return <Auth />;
-  }
 
   if (path === '/result') {
     return <Result />;
@@ -21,8 +18,8 @@ export default function App() {
 }
 
 function MainExperience() {
-  // 現在どの画面にいるかを管理 ("home" | "before_record" | "setting")
-  const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record' | 'setting'>('home');
+  // 画面を管理するステートに 'login' と 'signin' を追加！
+  const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record' | 'setting' | 'login' | 'signin'>('home');
   
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
@@ -71,12 +68,18 @@ function MainExperience() {
         boxShadow: '0 0 20px rgba(0,0,0,0.1)'
       }}>
 
-        {/* 画面の切り替え */}
+        {/* 1. ホーム画面 */}
         {currentScreen === 'home' && (
-          // ホーム画面
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <Home />
-            {/* 🗺️ マップ画面へ進むボタン */}
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {/* ホーム画面に、ログイン・新規登録へ飛ぶための関数を渡す */}
+            <div style={{ flex: 1 }}>
+              <Home 
+                onNavigateToLogin={() => setCurrentScreen('login')}
+                onNavigateToRegister={() => setCurrentScreen('signin')}
+              />
+            </div>
+            
+            {/* 🗺️ マップ画面へ進むボタン（テスト用） */}
             <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
               <button
                 onClick={() => setCurrentScreen('before_record')}
@@ -99,16 +102,37 @@ function MainExperience() {
           </div>
         )}
 
+        {/* 2. ログイン画面 */}
+        {currentScreen === 'login' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Login 
+              onNavigateToRegister={() => setCurrentScreen('signin')}
+              onStartWithoutAuth={() => setCurrentScreen('home')}
+              onLoginSuccess={(data) => {
+                console.log('ログイン成功:', data);
+                setCurrentScreen('home'); // 成功したらホーム画面に戻すなど
+              }}
+            />
+          </div>
+        )}
+
+        {/* 3. 新規登録画面 */}
+        {currentScreen === 'signin' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Register 
+              onNavigateToLogin={() => setCurrentScreen('login')}
+              onStartWithoutAuth={() => setCurrentScreen('home')}
+              onRegisterSuccess={() => setCurrentScreen('login')} // 登録成功したらログイン画面へ
+            />
+          </div>
+        )}
+
+        {/* 4. 記録前画面 ＆ マップ */}
         {currentScreen === 'before_record' && (
-          // 🗺️ 地図を全面にし、カードレイヤーを上に重ねる構造 (flex: 1 を追加)
           <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
-            
-            {/* 1. 背面のマップ（全体に敷き詰める） */}
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
               <MapView position={position} hasLocation={hasLocation} />
             </div>
-
-            {/* 2. 前面のオーバーレイUI */}
             <div style={{
               position: 'absolute',
               top: 0,
@@ -129,12 +153,11 @@ function MainExperience() {
                 onOpenSetting={() => setCurrentScreen('setting')} 
               />
             </div>
-
           </div>
         )}
 
+        {/* 5. 設定画面 */}
         {currentScreen === 'setting' && (
-          // ⚙️ 設定画面（メンバーとカラー）
           <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
             <Setting 
               initialColor={userColor}

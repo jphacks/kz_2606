@@ -4,15 +4,56 @@ import { Footprints, ArrowRight } from 'lucide-react';
 interface LoginProps {
   onNavigateToRegister?: () => void;
   onStartWithoutAuth?: () => void;
+  onLoginSuccess?: (data: any) => void; // ログイン成功時に親コンポーネントへ通知する用（必要に応じて）
 }
 
-export default function Login({ onNavigateToRegister, onStartWithoutAuth }: LoginProps) {
+export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLoginSuccess }: LoginProps) {
   const [accountName, setAccountName] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState(''); // エラーメッセージ用
+  const [isLoading, setIsLoading] = useState(false);     // ローディング状態用
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    // ログイン処理
+    setErrorMessage('');
+    setIsLoading(true);
+
+    try {
+      // バックエンドの /api/auth/login へ送信
+      // ※バックエンド側が username を求めているため accountName を当てはめています
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: accountName,
+          password: password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // サーバーからエラーが返ってきた場合
+        setErrorMessage(data.error?.message || 'ログインに失敗しました');
+        return;
+      }
+
+      // ログイン成功！
+      console.log('ログイン成功:', data);
+      alert('ログインしました！');
+      
+      if (onLoginSuccess) {
+        onLoginSuccess(data);
+      }
+
+    } catch (err) {
+      console.error('通信エラー:', err);
+      setErrorMessage('サーバーとの通信に失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -25,7 +66,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth }: Logi
           </div>
           <span className="text-xl font-bold tracking-tight text-[#0F5A40]">まちえ</span>
         </div>
-        <button className="text-sm font-medium text-[#0F5A40] hover:underline">
+        <button className="text-sm font-medium text-[#0F5A40] hover:underline cursor-pointer">
           使い方
         </button>
       </header>
@@ -58,6 +99,13 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth }: Logi
             <h2 className="text-lg font-bold text-[#1B3B2B]">ログイン</h2>
           </div>
 
+          {/* エラーメッセージ表示エリア */}
+          {errorMessage && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+              {errorMessage}
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-4">
             {/* アカウント名入力 */}
             <div>
@@ -74,6 +122,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth }: Logi
                   onChange={(e) => setAccountName(e.target.value)}
                   placeholder="アカウント名を入力"
                   className="w-full pl-10 pr-4 py-3 bg-[#F9FBF8] border border-[#E2EBDD] rounded-xl text-sm text-[#1B3B2B] placeholder-[#9CAEA3] focus:outline-none focus:ring-2 focus:ring-[#0F5A40]/30 focus:border-[#0F5A40] transition-all"
+                  required
                 />
               </div>
             </div>
@@ -93,6 +142,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth }: Logi
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
                   className="w-full pl-10 pr-4 py-3 bg-[#F9FBF8] border border-[#E2EBDD] rounded-xl text-sm text-[#1B3B2B] placeholder-[#9CAEA3] focus:outline-none focus:ring-2 focus:ring-[#0F5A40]/30 focus:border-[#0F5A40] transition-all"
+                  required
                 />
               </div>
             </div>
@@ -100,10 +150,11 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth }: Logi
             {/* ログインボタン */}
             <button
               type="submit"
-              className="w-full mt-2 bg-[#0F5A40] hover:bg-[#0C4A34] text-white font-medium py-3.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              disabled={isLoading}
+              className="w-full mt-2 bg-[#0F5A40] hover:bg-[#0C4A34] text-white font-medium py-3.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
             >
               <ArrowRight className="w-4 h-4" />
-              <span>ログイン</span>
+              <span>{isLoading ? 'ログイン中...' : 'ログイン'}</span>
             </button>
 
             {/* ログインせずにはじめるボタン */}

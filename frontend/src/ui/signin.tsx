@@ -4,15 +4,59 @@ import { Mail, ArrowRight } from 'lucide-react';
 interface RegisterProps {
   onNavigateToLogin?: () => void;
   onStartWithoutAuth?: () => void;
+  onRegisterSuccess?: (data: any) => void; // 登録成功時に親へ通知する用（必要に応じて）
 }
 
-export default function Register({ onNavigateToLogin, onStartWithoutAuth }: RegisterProps) {
+export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegisterSuccess }: RegisterProps) {
   const [accountName, setAccountName] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState(''); // エラーメッセージ用
+  const [isLoading, setIsLoading] = useState(false);     // ローディング状態用
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 新規登録処理
+    setErrorMessage('');
+    setIsLoading(true);
+
+    try {
+      // バックエンドの /api/auth/register へ送信
+      // ※バックエンド側が username を求めているため accountName を当てはめています
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username: accountName,
+          password: password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // サーバーからエラーが返ってきた場合
+        setErrorMessage(data.error?.message || '新規登録に失敗しました');
+        return;
+      }
+
+      // 新規登録成功！
+      console.log('登録成功:', data);
+      alert('ユーザー登録が完了しました！');
+      
+      if (onRegisterSuccess) {
+        onRegisterSuccess(data);
+      } else if (onNavigateToLogin) {
+        // 成功したら自動でログイン画面に切り替えるなどの動線も作れます
+        onNavigateToLogin();
+      }
+
+    } catch (err) {
+      console.error('通信エラー:', err);
+      setErrorMessage('サーバーとの通信に失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -30,7 +74,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth }: Regi
           </div>
           <span className="text-xl font-bold tracking-tight text-[#0F5A40]">まちえ</span>
         </div>
-        <button className="text-sm font-medium text-[#0F5A40] hover:underline">
+        <button className="text-sm font-medium text-[#0F5A40] hover:underline cursor-pointer">
           使い方
         </button>
       </header>
@@ -63,6 +107,13 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth }: Regi
             <h2 className="text-lg font-bold text-[#1B3B2B]">新規登録</h2>
           </div>
 
+          {/* エラーメッセージ表示エリア */}
+          {errorMessage && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+              {errorMessage}
+            </div>
+          )}
+
           <form onSubmit={handleRegister} className="space-y-4">
             {/* アカウント名入力 */}
             <div>
@@ -79,6 +130,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth }: Regi
                   onChange={(e) => setAccountName(e.target.value)}
                   placeholder="例 : machie_user"
                   className="w-full pl-10 pr-4 py-3 bg-[#F9FBF8] border border-[#E2EBDD] rounded-xl text-sm text-[#1B3B2B] placeholder-[#9CAEA3] focus:outline-none focus:ring-2 focus:ring-[#0F5A40]/30 focus:border-[#0F5A40] transition-all"
+                  required
                 />
               </div>
             </div>
@@ -98,6 +150,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth }: Regi
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="w-full pl-10 pr-4 py-3 bg-[#F9FBF8] border border-[#E2EBDD] rounded-xl text-sm text-[#1B3B2B] placeholder-[#9CAEA3] focus:outline-none focus:ring-2 focus:ring-[#0F5A40]/30 focus:border-[#0F5A40] transition-all"
+                  required
                 />
               </div>
             </div>
@@ -105,10 +158,11 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth }: Regi
             {/* 新規登録ボタン */}
             <button
               type="submit"
-              className="w-full mt-2 bg-[#0F5A40] hover:bg-[#0C4A34] text-white font-medium py-3.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              disabled={isLoading}
+              className="w-full mt-2 bg-[#0F5A40] hover:bg-[#0C4A34] text-white font-medium py-3.5 px-4 rounded-xl shadow-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
             >
               <ArrowRight className="w-4 h-4" />
-              <span>新規登録</span>
+              <span>{isLoading ? '登録中...' : '新規登録'}</span>
             </button>
 
             {/* ログインせずにはじめるボタン */}
