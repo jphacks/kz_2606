@@ -33,8 +33,8 @@ func (r *RoomRepository) Create(ctx context.Context, owner domain.User, code, ti
 	err = tx.QueryRow(ctx, `
 		INSERT INTO rooms (code, title, owner_user_id)
 		VALUES ($1, $2, $3)
-		RETURNING id, code, title
-	`, code, title, owner.ID).Scan(&room.ID, &room.Code, &room.Title)
+		RETURNING id, code, title, created_at
+	`, code, title, owner.ID).Scan(&room.ID, &room.Code, &room.Title, &room.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -403,11 +403,11 @@ func findRoomByCode(ctx context.Context, q queryRower, code string) (domain.Room
 	var room domain.Room
 	var closedAt pgtype.Timestamptz
 	err := q.QueryRow(ctx, `
-		SELECT rooms.id, rooms.code, rooms.title, members.id, rooms.closed_at
+		SELECT rooms.id, rooms.code, rooms.title, members.id, rooms.created_at, rooms.closed_at
 		FROM rooms
 		JOIN members ON members.room_id = rooms.id AND members.user_id = rooms.owner_user_id
 		WHERE rooms.code = $1
-	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerMemberID, &closedAt)
+	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerMemberID, &room.CreatedAt, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Room{}, domain.ErrRoomNotFound
 	}

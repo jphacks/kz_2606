@@ -17,6 +17,7 @@ type Room struct {
 	Code          string
 	Title         string
 	OwnerMemberID int64
+	CreatedAt     time.Time
 	ClosedAt      *time.Time
 }
 

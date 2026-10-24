@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jphacks/kz_2606/backend/internal/domain"
@@ -82,7 +83,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		memberID: you.ID,
 	}
 	h.registry.Add(connection)
-	payload, err := json.Marshal(makeSnapshotDTO(snapshot, you, h.registry))
+	payload, err := json.Marshal(makeSnapshotDTO(snapshot, you, h.registry, time.Now()))
 	if err != nil {
 		slog.Error("encode websocket snapshot failed", "err", err)
 		connection.shutdown()

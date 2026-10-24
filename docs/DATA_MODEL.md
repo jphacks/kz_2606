@@ -319,6 +319,8 @@ GET /ws?room=KZ26AB
     "ownerMemberId": 1, "closedAt": null
   },
   "you": { "id": 3, "displayName": "たろう", "color": "#ff2d78", "isOwner": false },
+  "stats": { "meters": 1843.2, "members": 3,
+             "startedAt": "2026-10-24T05:00:00Z", "elapsedMs": 5400000 },
   "members": [
     { "id": 1, "displayName": "はなこ", "color": "#00e5ff", "online": true,  "banned": false, "recording": true  },
     { "id": 3, "displayName": "たろう", "color": "#ff2d78", "online": true,  "banned": false, "recording": false },
@@ -359,6 +361,15 @@ GET /ws?room=KZ26AB
   `route_end` = 記録を止めた（まだ部屋にいる） / `leave` = 接続が切れた
 - **未知の `t` は両側で黙って無視する。** これがプロトコル拡張の唯一のルール。
   新しいメッセージ種別は古いクライアントを壊さずに足せる
+- **`stats` は部屋全体の集計。** 接続した直後に合計を出すためにサーバーが計算して載せる
+  - `meters` は全 route の累積距離。**BAN されたメンバーの route は含めない**
+    （フロントが非表示にするので、合計だけ合わないと混乱する）
+  - 点の間が `GAP_MS`（30秒）以上空いた区間は距離に数えない。
+    クライアントの `geo.ts` と同じルールなので、**片方だけ変えると数字がズレる**
+  - `members` は BAN を除いた参加人数
+  - `elapsedMs` は部屋の作成から、締めてあればその時刻まで。**締めたら止まる**
+  - 進行中の部屋では `elapsedMs` は snapshot を作った瞬間の値なので、
+    **クライアントは `startedAt` を基準に自分で時計を進める**
 
 ### サーバー側のバリデーション
 
@@ -538,7 +549,8 @@ Map<routeId, {
 | `MAX_ACCURACY_M` | 30 | `frontend/src/lib/geo.ts` | — |
 | `MIN_DISTANCE_M` | 5 | 同 | **点の総数を直接決める。** 1mにすると5倍 |
 | `MAX_SPEED_MPS` | 14 | 同 | — |
-| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外 |
+| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
+| `GapMillis` | 30,000 | `backend/internal/domain/distance.go` | `snapshot.stats.meters` の算出。**`GAP_MS` と連動** |
 | `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/hooks/useTracks.ts` | 描画性能 |
 | `FLUSH_MS` | 3,000 | `frontend/src/hooks/useRecorder.ts` | 送信頻度 = `stats` の更新頻度 |
 | `CHUNK` | 500 | `frontend/src/lib/ws.ts` | **`maxMessageSize` 64KB を超えない上限** |

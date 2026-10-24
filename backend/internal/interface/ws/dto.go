@@ -42,15 +42,24 @@ type routeDTO struct {
 	Points   []pointTuple `json:"pts"`
 }
 
+type statsDTO struct {
+	Meters    float64   `json:"meters"`
+	Members   int       `json:"members"`
+	StartedAt time.Time `json:"startedAt"`
+	ElapsedMs int64     `json:"elapsedMs"`
+}
+
 type snapshotDTO struct {
 	Type    string      `json:"t"`
 	Room    roomDTO     `json:"room"`
 	You     youDTO      `json:"you"`
+	Stats   statsDTO    `json:"stats"`
 	Members []memberDTO `json:"members"`
 	Routes  []routeDTO  `json:"routes"`
 }
 
-func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry) snapshotDTO {
+func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry, now time.Time) snapshotDTO {
+	stats := snapshot.Stats(now)
 	memberByID := make(map[int64]domain.Member, len(snapshot.Members))
 	recordingByMember := make(map[int64]bool)
 	for _, member := range snapshot.Members {
@@ -105,6 +114,12 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			DisplayName: you.DisplayName,
 			Color:       you.Color,
 			IsOwner:     you.ID == snapshot.Room.OwnerMemberID,
+		},
+		Stats: statsDTO{
+			Meters:    stats.Meters,
+			Members:   stats.Members,
+			StartedAt: stats.StartedAt,
+			ElapsedMs: stats.Elapsed.Milliseconds(),
 		},
 		Members: members,
 		Routes:  routes,
