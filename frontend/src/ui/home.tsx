@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { Waypoints, Footprints, Flag, Link as LinkIcon, Plus, X, History, LogIn, UserPlus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, UserPlus } from 'lucide-react';
+import QRCode from 'qrcode';
+import { buildInviteUrl, createRoom } from '../lib/api';
 
 interface HomeProps {
   onNavigateToLogin?: () => void;
@@ -10,6 +12,54 @@ interface HomeProps {
 
 export default function Home({ onNavigateToLogin, onNavigateToRegister, onStartSolo, username }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [teamName, setTeamName] = useState('');
+  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [isCreatingTeam, setIsCreatingTeam] = useState(false);
+  const [createTeamError, setCreateTeamError] = useState('');
+  const [inviteQrCode, setInviteQrCode] = useState<string | null>(null);
+  const [qrCodeError, setQrCodeError] = useState<string | null>(null);
+
+  // QRには招待URL（`?room=<CODE>`）を載せる。仕様10章
+  // 部屋コードが無いうちは生成しない（現在ページのURLを載せても参加できない）
+  useEffect(() => {
+    if (!isModalOpen || !roomCode) {
+      setInviteQrCode(null);
+      setQrCodeError(null);
+      return;
+    }
+
+    let cancelled = false;
+    QRCode.toDataURL(buildInviteUrl(roomCode), { width: 192, margin: 1 })
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setInviteQrCode(dataUrl);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setQrCodeError(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen, roomCode]);
+
+  const handleCreateTeam = async () => {
+    const title = teamName.trim() || 'まちあるき部';
+    setCreateTeamError('');
+    setIsCreatingTeam(true);
+    try {
+      const room = await createRoom(title);
+      setRoomCode(room.code);
+    } catch (err) {
+      console.error('チームを作成できませんでした:', err);
+      setCreateTeamError(err instanceof Error ? err.message : 'チームを作成できませんでした');
+    } finally {
+      setIsCreatingTeam(false);
+    }
+  };
 
   return (
     <div
@@ -169,50 +219,67 @@ export default function Home({ onNavigateToLogin, onNavigateToRegister, onStartS
             <h3 className="font-bold text-gray-900 mb-3">チームを作る</h3>
             <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0E7861] transition">
               <Flag size={20} className="text-[#0E7861] mr-3" />
-              <input 
-                type="text" 
-                placeholder="まちあるき部" 
+              <input
+                type="text"
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                placeholder="まちあるき部"
+                maxLength={40}
                 className="w-full outline-none text-gray-800 placeholder-gray-400 bg-transparent"
                 tabIndex={isModalOpen ? 0 : -1}
               />
             </div>
-            <button 
-              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md cursor-pointer"
+
+            {createTeamError && (
+              <div role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+                {createTeamError}
+              </div>
+            )}
+
+            <button
+              onClick={handleCreateTeam}
+              disabled={isCreatingTeam}
+              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md cursor-pointer disabled:opacity-50"
               tabIndex={isModalOpen ? 0 : -1}
             >
               <Plus size={20} />
-              チームを作成
+              {isCreatingTeam ? '作成中...' : roomCode ? 'もう一度作成' : 'チームを作成'}
             </button>
+
+            {/* 作成できたら、招待用のQRと部屋コードを出す */}
+            {roomCode && (
+              <div className="mt-4 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-center">
+                {inviteQrCode ? (
+                  <img src={inviteQrCode} alt="招待用QRコード" className="w-48 h-48 mb-3" />
+                ) : qrCodeError ? (
+                  <p role="alert" className="text-sm text-red-600 mb-3">
+                    QRコードを生成できませんでした: {qrCodeError}
+                  </p>
+                ) : (
+                  <div className="w-48 h-48 mb-3 flex items-center justify-center text-[#0E7861]">
+                    <QrCode size={40} aria-hidden="true" />
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mb-1">このQRを見せて招待しましょう</p>
+                <p className="text-lg font-bold tracking-widest text-gray-900">{roomCode}</p>
+              </div>
+            )}
           </div>
 
           <div>
             <h3 className="font-bold text-gray-900 mb-3">招待された方はこちら</h3>
-            <div className="bg-white border border-gray-200 rounded-xl flex items-center p-3 mb-3 shadow-sm focus-within:border-[#0E7861] transition">
-              <LinkIcon size={20} className="text-gray-400 mr-3" />
-              <input 
-                type="text" 
-                placeholder="招待URLを貼り付け" 
-                className="w-full outline-none text-gray-800 placeholder-gray-400 bg-transparent"
-                tabIndex={isModalOpen ? 0 : -1}
-              />
-              <button 
-                className="text-[#0E7861] text-sm font-bold whitespace-nowrap ml-2 cursor-pointer"
-                tabIndex={isModalOpen ? 0 : -1}
-              >
-                貼り付け
-              </button>
+
+            {/* 読み取りはOS標準カメラでよい（TECH_PLAN 7.1）のでアプリ内スキャナは置かない */}
+            <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+              <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+                <li>チームを作った人にQRコードを見せてもらう</li>
+                <li>スマホの<span className="font-bold text-gray-900">標準のカメラ</span>でそのまま読み取る</li>
+                <li>開いたリンクからそのまま参加できます</li>
+              </ol>
             </div>
-            <button 
-              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition cursor-pointer"
-              tabIndex={isModalOpen ? 0 : -1}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14"></path>
-                <path d="m12 5 7 7-7 7"></path>
-              </svg>
-              招待URLから参加
-            </button>
-            <p className="text-xs text-gray-400 mt-4 text-center">届いた招待リンクを直接開いても参加できます</p>
+            <p className="text-xs text-gray-400 mt-4 text-center">
+              招待リンクを直接開いても参加できます。
+            </p>
           </div>
         </div>
       </div>
