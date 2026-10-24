@@ -40,6 +40,11 @@ func (testUsers) FindPersonalRoom(context.Context, int64) (domain.Room, error) {
 	return domain.Room{}, domain.ErrRoomNotFound
 }
 
+func (testUsers) CreatePersonalRoom(_ context.Context, owner domain.User, roomCode, roomTitle string) (domain.Room, domain.Member, error) {
+	return domain.Room{ID: owner.ID, Code: roomCode, Title: roomTitle, OwnerUserID: owner.ID, IsPrivate: true},
+		domain.Member{ID: owner.ID, DisplayName: owner.Username, Color: domain.FirstMemberColor}, nil
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(string) (string, error)  { return "", nil }

@@ -11,6 +11,7 @@ type UserRepository interface {
 	FindByUsername(ctx context.Context, username string) (domain.User, string, error)
 	FindByID(ctx context.Context, id int64) (domain.User, error)
 	FindPersonalRoom(ctx context.Context, ownerUserID int64) (domain.Room, error)
+	CreatePersonalRoom(ctx context.Context, owner domain.User, roomCode, roomTitle string) (domain.Room, domain.Member, error)
 }
 
 type PasswordHasher interface {

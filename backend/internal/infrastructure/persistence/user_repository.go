@@ -73,6 +73,50 @@ func (r *UserRepository) CreateWithPersonalRoom(
 	return user, room, member, nil
 }
 
+// CreatePersonalRoom は既にいるユーザーに個人ルームを作る。
+// 個人ルームが導入される前に登録されたアカウントを後から揃えるために使う。
+func (r *UserRepository) CreatePersonalRoom(
+	ctx context.Context,
+	owner domain.User,
+	roomCode, roomTitle string,
+) (domain.Room, domain.Member, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	var room domain.Room
+	err = tx.QueryRow(ctx, `
+		INSERT INTO rooms (code, title, owner_user_id, is_private)
+		VALUES ($1, $2, $3, TRUE)
+		RETURNING id, code, title, is_private
+	`, roomCode, roomTitle, owner.ID).Scan(&room.ID, &room.Code, &room.Title, &room.IsPrivate)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// 23505 は code の重複（別コードで張り直す）か、
+		// rooms_one_private_room_per_owner の重複（他の接続が先に作った）のどちらか。
+		// 呼び出し側が FindPersonalRoom で引き直して判別する。
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+		}
+		return domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerUserID = owner.ID
+
+	member, err := insertMember(ctx, tx, room.ID, owner.ID, owner.Username, domain.FirstMemberColor)
+	if err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerMemberID = member.ID
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	return room, member, nil
+}
+
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (domain.User, string, error) {
 	var user domain.User
 	var passwordHash string

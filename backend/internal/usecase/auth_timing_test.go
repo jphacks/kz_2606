@@ -41,6 +41,11 @@ func (emptyUsers) FindPersonalRoom(context.Context, int64) (domain.Room, error) 
 	return domain.Room{}, domain.ErrRoomNotFound
 }
 
+func (emptyUsers) CreatePersonalRoom(_ context.Context, owner domain.User, roomCode, roomTitle string) (domain.Room, domain.Member, error) {
+	return domain.Room{ID: owner.ID, Code: roomCode, Title: roomTitle, OwnerUserID: owner.ID, IsPrivate: true},
+		domain.Member{ID: owner.ID, DisplayName: owner.Username, Color: domain.FirstMemberColor}, nil
+}
+
 type stubSessions struct{}
 
 func (stubSessions) Encode(int64) (string, error) { return "token", nil }

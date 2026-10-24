@@ -85,6 +85,42 @@ func TestRegisterRetriesPersonalRoomCodeCollision(t *testing.T) {
 	}
 }
 
+func (r *testUsers) CreatePersonalRoom(
+	_ context.Context,
+	owner domain.User,
+	roomCode, roomTitle string,
+) (domain.Room, domain.Member, error) {
+	if r.codeConflictsLeft > 0 {
+		r.codeConflictsLeft--
+		return domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+	}
+	if _, exists := r.rooms[roomCode]; exists {
+		return domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+	}
+	// 個人ルームは1ユーザー1つ（schema.sql の部分ユニーク索引に相当）
+	for _, room := range r.rooms {
+		if room.IsPrivate && room.OwnerUserID == owner.ID {
+			return domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+		}
+	}
+	room := domain.Room{
+		ID:          owner.ID,
+		Code:        roomCode,
+		Title:       roomTitle,
+		OwnerUserID: owner.ID,
+		IsPrivate:   true,
+	}
+	member := domain.Member{
+		ID:          owner.ID,
+		DisplayName: owner.Username,
+		Color:       domain.FirstMemberColor,
+	}
+	room.OwnerMemberID = member.ID
+	r.rooms[roomCode] = room
+	r.members[roomCode] = []domain.Member{member}
+	return room, member, nil
+}
+
 func (r *testUsers) FindByUsername(_ context.Context, username string) (domain.User, string, error) {
 	user, exists := r.users[username]
 	if !exists {
@@ -366,5 +402,86 @@ func TestCookieSecureIsConfigurable(t *testing.T) {
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].Secure || cookies[0].MaxAge != 3600 {
 		t.Fatalf("session cookie = %+v", cookies)
+	}
+}
+
+// 個人ルームが導入される前に登録されたアカウント（個人ルームを持たないユーザー）でも
+// ログインでき、その場で個人ルームが作られることを確認する。
+func TestLoginCreatesPersonalRoomForExistingAccount(t *testing.T) {
+	users := &testUsers{
+		users:   map[string]domain.User{"legacy_1": {ID: 42, Username: "legacy_1"}},
+		hashes:  map[string]string{"legacy_1": "hash:password123"},
+		rooms:   make(map[string]domain.Room),
+		members: make(map[string][]domain.Member),
+		nextID:  42,
+	}
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+
+	login := httptest.NewRecorder()
+	router.ServeHTTP(login, postJSON("/api/auth/login", `{"username":"legacy_1","password":"password123"}`))
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d, body = %s", login.Code, login.Body)
+	}
+	var result struct {
+		User apiUser      `json:"user"`
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(login.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Room.Code == "" || !result.Room.IsPrivate {
+		t.Fatalf("login room = %+v; want 個人ルーム", result.Room)
+	}
+	if result.Room.Title != "legacy_1のルーム" {
+		t.Errorf("room title = %q, want %q", result.Room.Title, "legacy_1のルーム")
+	}
+	stored, ok := users.rooms[result.Room.Code]
+	if !ok || stored.OwnerUserID != 42 || !stored.IsPrivate {
+		t.Fatalf("保存された部屋 = %+v; want user 42 の個人ルーム", stored)
+	}
+
+	// 2回目のログインでは作り直さず、同じ部屋を返す
+	again := httptest.NewRecorder()
+	router.ServeHTTP(again, postJSON("/api/auth/login", `{"username":"legacy_1","password":"password123"}`))
+	var second struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(again.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Room.Code != result.Room.Code {
+		t.Fatalf("2回目のログインで別の部屋が返りました: %q → %q", result.Room.Code, second.Room.Code)
+	}
+	if len(users.rooms) != 1 {
+		t.Fatalf("部屋が %d 個あります; want 1", len(users.rooms))
+	}
+}
+
+// /api/auth/me でも同じく、個人ルームが無ければ作って返す
+func TestMeCreatesPersonalRoomForExistingAccount(t *testing.T) {
+	users := &testUsers{
+		users:   map[string]domain.User{"legacy_2": {ID: 7, Username: "legacy_2"}},
+		hashes:  map[string]string{"legacy_2": "hash:password123"},
+		rooms:   make(map[string]domain.Room),
+		members: make(map[string][]domain.Member),
+		nextID:  7,
+	}
+	router := NewRouter(usecase.NewAuthService(users, testHasher{}, testSessions{}), nil, testCookies)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "user-7"})
+	me := httptest.NewRecorder()
+	router.ServeHTTP(me, request)
+	if me.Code != http.StatusOK {
+		t.Fatalf("me status = %d, body = %s", me.Code, me.Body)
+	}
+	var result struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(me.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Room.Code == "" || !result.Room.IsPrivate {
+		t.Fatalf("me room = %+v; want 個人ルーム", result.Room)
 	}
 }

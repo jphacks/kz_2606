@@ -89,7 +89,7 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	room, err := h.service.PersonalRoom(r.Context(), user.ID)
+	room, err := h.service.PersonalRoom(r.Context(), user)
 	if err != nil {
 		slog.Error("get personal room failed", "err", err, "user_id", user.ID)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")

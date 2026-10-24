@@ -7,7 +7,10 @@ import (
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
 
-const maxPersonalRoomCodeAttempts = 5
+const (
+	maxPersonalRoomCodeAttempts = 5
+	personalRoomTitleSuffix     = "のルーム"
+)
 
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
@@ -44,7 +47,7 @@ func (s *AuthService) Register(ctx context.Context, username, password string) (
 	if err != nil {
 		return AuthResult{}, err
 	}
-	title := normalizedUsername + "のルーム"
+	title := normalizedUsername + personalRoomTitleSuffix
 	var user domain.User
 	var room domain.Room
 	created := false
@@ -102,7 +105,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (Aut
 	if err != nil {
 		return AuthResult{}, err
 	}
-	room, err := s.users.FindPersonalRoom(ctx, user.ID)
+	room, err := s.ensurePersonalRoom(ctx, user)
 	if err != nil {
 		return AuthResult{}, err
 	}
@@ -124,6 +127,40 @@ func (s *AuthService) Me(ctx context.Context, token string) (domain.User, error)
 	return user, nil
 }
 
-func (s *AuthService) PersonalRoom(ctx context.Context, ownerUserID int64) (domain.Room, error) {
-	return s.users.FindPersonalRoom(ctx, ownerUserID)
+func (s *AuthService) PersonalRoom(ctx context.Context, user domain.User) (domain.Room, error) {
+	return s.ensurePersonalRoom(ctx, user)
+}
+
+// ensurePersonalRoom は個人ルームを返す。無ければ作る。
+// 個人ルームが導入される前に登録されたアカウントでもログインできるようにするため、
+// 「無い」を異常として扱わない。仕様: DATA_MODEL.md 5章
+func (s *AuthService) ensurePersonalRoom(ctx context.Context, user domain.User) (domain.Room, error) {
+	room, err := s.users.FindPersonalRoom(ctx, user.ID)
+	if err == nil {
+		return room, nil
+	}
+	if !errors.Is(err, domain.ErrRoomNotFound) {
+		return domain.Room{}, err
+	}
+
+	title := user.Username + personalRoomTitleSuffix
+	for range maxPersonalRoomCodeAttempts {
+		code, err := domain.NewRoomCode()
+		if err != nil {
+			return domain.Room{}, err
+		}
+		room, _, err := s.users.CreatePersonalRoom(ctx, user, code, title)
+		if err == nil {
+			return room, nil
+		}
+		if !errors.Is(err, domain.ErrRoomCodeTaken) {
+			return domain.Room{}, err
+		}
+		// コードの重複か、同時ログインで他の接続が先に作ったかのどちらか。
+		// 後者なら既に出来ているので、引き直して返す。
+		if existing, findErr := s.users.FindPersonalRoom(ctx, user.ID); findErr == nil {
+			return existing, nil
+		}
+	}
+	return domain.Room{}, errors.New("could not allocate a unique room code")
 }

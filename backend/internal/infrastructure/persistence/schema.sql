@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS rooms (
 
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false;
 
+-- 個人ルームは1ユーザーにつき1つ。同時ログインで二重に作られるのを防ぐ。
+-- FindPersonalRoom の検索にもこの索引が使える。
+CREATE UNIQUE INDEX IF NOT EXISTS rooms_one_private_room_per_owner
+    ON rooms (owner_user_id) WHERE is_private;
+
 CREATE TABLE IF NOT EXISTS members (
     id           BIGSERIAL PRIMARY KEY,
     room_id      BIGINT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
