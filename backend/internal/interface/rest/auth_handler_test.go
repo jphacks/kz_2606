@@ -94,7 +94,7 @@ func postJSON(target, body string) *http.Request {
 }
 
 func TestAuthEndpoints(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"Taro_1","password":"password123"}`))
@@ -111,7 +111,13 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Fatalf("registered user = %+v", registered.User)
 	}
 	cookies := register.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != sessionCookieName || !cookies[0].HttpOnly || !cookies[0].Secure {
+	if len(cookies) != 1 ||
+		cookies[0].Name != sessionCookieName ||
+		cookies[0].Path != "/" ||
+		!cookies[0].HttpOnly ||
+		!cookies[0].Secure ||
+		cookies[0].SameSite != http.SameSiteLaxMode ||
+		cookies[0].MaxAge != int(testCookies.Lifetime.Seconds()) {
 		t.Fatalf("registration session cookie = %+v", cookies)
 	}
 
@@ -129,7 +135,14 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Fatalf("logout status = %d", logout.Code)
 	}
 	expiredCookie := logout.Result().Cookies()
-	if len(expiredCookie) != 1 || expiredCookie[0].MaxAge >= 0 {
+	if len(expiredCookie) != 1 ||
+		expiredCookie[0].Name != sessionCookieName ||
+		expiredCookie[0].Value != "" ||
+		expiredCookie[0].Path != "/" ||
+		!expiredCookie[0].HttpOnly ||
+		!expiredCookie[0].Secure ||
+		expiredCookie[0].SameSite != http.SameSiteLaxMode ||
+		expiredCookie[0].MaxAge >= 0 {
 		t.Fatalf("logout cookie was not expired: %+v", expiredCookie)
 	}
 
@@ -138,10 +151,46 @@ func TestAuthEndpoints(t *testing.T) {
 	if login.Code != http.StatusOK {
 		t.Fatalf("login response = %d %s", login.Code, login.Body)
 	}
+	if loginCookies := login.Result().Cookies(); len(loginCookies) != 1 || loginCookies[0].Name != sessionCookieName {
+		t.Fatalf("login session cookie = %+v", loginCookies)
+	}
+}
+
+func TestAllProtectedRoutesRequireAuth(t *testing.T) {
+	router, _ := newRoomTestRouter()
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPost, "/api/rooms"},
+		{http.MethodPost, "/api/rooms/KZ26AB/join"},
+		{http.MethodPost, "/api/rooms/KZ26AB/close"},
+		{http.MethodPost, "/api/rooms/KZ26AB/reopen"},
+		{http.MethodPost, "/api/rooms/KZ26AB/members/1/ban"},
+		{http.MethodDelete, "/api/rooms/KZ26AB/members/1/ban"},
+		{http.MethodDelete, "/api/rooms/KZ26AB/routes/1"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, nil))
+			if response.Code != http.StatusUnauthorized {
+				t.Errorf("%s %s = %d %s; want 401",
+					testCase.method, testCase.path, response.Code, response.Body)
+			}
+		})
+	}
+
+	public := httptest.NewRecorder()
+	router.ServeHTTP(public, httptest.NewRequest(http.MethodGet, "/api/rooms/KZ26AB", nil))
+	if public.Code == http.StatusUnauthorized {
+		t.Errorf("GET /api/rooms/{code} = 401; route should be public")
+	}
 }
 
 func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/login", `{"username":"missing","password":"password123"}`))
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"invalid_credentials"`) {
@@ -150,7 +199,7 @@ func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
 }
 
 func TestRegisterRejectsInvalidCredentials(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"ab","password":"short"}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
@@ -158,8 +207,32 @@ func TestRegisterRejectsInvalidCredentials(t *testing.T) {
 	}
 }
 
+func TestRegisterAcceptsSixteenCharacterUsername(t *testing.T) {
+	router := NewRouter(newTestAuthService(), nil, testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON(
+		"/api/auth/register",
+		`{"username":"abcdefghijklmnop","password":"password123"}`,
+	))
+	if response.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body = %s", response.Code, response.Body)
+	}
+}
+
+func TestRegisterRejectsSeventeenCharacterUsername(t *testing.T) {
+	router := NewRouter(newTestAuthService(), nil, testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON(
+		"/api/auth/register",
+		`{"username":"abcdefghijklmnopq","password":"password123"}`,
+	))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
+		t.Fatalf("register response = %d %s, want invalid_username", response.Code, response.Body)
+	}
+}
+
 func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":""}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_password"`) {
@@ -168,7 +241,7 @@ func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
 }
 
 func TestRegisterRejectsNonJSONContentType(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
 		request := httptest.NewRequest(
 			http.MethodPost,
@@ -192,7 +265,7 @@ func TestRegisterRejectsNonJSONContentType(t *testing.T) {
 }
 
 func TestLoginAcceptsUnknownFields(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	if register.Code != http.StatusOK {
@@ -206,7 +279,7 @@ func TestLoginAcceptsUnknownFields(t *testing.T) {
 }
 
 func TestCookieSecureIsConfigurable(t *testing.T) {
-	router := NewRouter(newTestAuthService(), CookieOptions{Secure: false, Lifetime: time.Hour})
+	router := NewRouter(newTestAuthService(), nil, CookieOptions{Secure: false, Lifetime: time.Hour})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	cookies := response.Result().Cookies()

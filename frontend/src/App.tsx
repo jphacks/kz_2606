@@ -1,28 +1,57 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
+import Setting from './ui/setting';
+import Result from './ui/result';
 import Auth from './ui/Auth';
+import { getCurrentUser } from './lib/api';
+import type { User } from './lib/types';
 
+type Screen = 'home' | 'before_record' | 'setting' | 'login' | 'signin';
+
+function getScreenFromPath(path: string): Screen {
+  if (path === '/login') return 'login';
+  if (path === '/signin') return 'signin';
+  return 'home';
+}
 
 export default function App() {
   const path = window.location.pathname;
 
-  if (path === '/login' || path === '/signin') {
-    return <Auth />;
+  if (path === '/result') {
+    return <Result />;
   }
 
-  return <MainExperience />;
+  return <MainExperience initialScreen={getScreenFromPath(path)} />;
 }
 
-function MainExperience() {
-  // 現在表示している画面を管理する
-  const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record'>('home');
-  
+function MainExperience({ initialScreen }: { initialScreen: Screen }) {
+  const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
+  const [userColor, setUserColor] = useState('#0E7861'); // 選択した軌跡カラー
+  const [user, setUser] = useState<User | null>(null);
+  const [authError, setAuthError] = useState('');
+  const authRequestVersion = useRef(0);
 
   useEffect(() => {
+    let isMounted = true;
+    const requestVersion = authRequestVersion.current;
+
+    getCurrentUser()
+      .then((currentUser) => {
+        if (isMounted && authRequestVersion.current === requestVersion) {
+          setUser(currentUser);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('ログイン状態の確認に失敗しました:', err);
+        if (isMounted && authRequestVersion.current === requestVersion) {
+          setAuthError('ログイン状態を確認できませんでした。時間をおいて再読み込みしてください。');
+        }
+      });
+
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -33,7 +62,32 @@ function MainExperience() {
         { enableHighAccuracy: true }
       );
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    const handlePopState = () => setCurrentScreen(getScreenFromPath(window.location.pathname));
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateToScreen = (screen: Screen) => {
+    const path = screen === 'login' ? '/login' : screen === 'signin' ? '/signin' : screen === 'home' ? '/' : null;
+    if (path && window.location.pathname !== path) {
+      window.history.pushState({}, '', path);
+    }
+    setCurrentScreen(screen);
+  };
+
+  const handleAuthSuccess = (authenticatedUser: User) => {
+    authRequestVersion.current += 1;
+    setUser(authenticatedUser);
+    setAuthError('');
+    navigateToScreen('home');
+  };
 
   const handleStartRecording = () => {
     console.log('記録が開始されました！');
@@ -64,16 +118,27 @@ function MainExperience() {
         flexDirection: 'column',
         boxShadow: '0 0 20px rgba(0,0,0,0.1)'
       }}>
+        {authError && (
+          <div role="alert" className="px-4 py-2 text-sm text-red-700 bg-red-50">
+            {authError}
+          </div>
+        )}
 
-        {/* 画面の切り替え */}
-        {currentScreen === 'home' ? (
-          // ホーム画面
-          <div style={{ flex: 1, overflowY: 'auto' }}>
-            <Home />
-            {/* 画面遷移用ボタン */}
+        {/* 1. ホーム画面 */}
+        {currentScreen === 'home' && (
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1 }}>
+              <Home
+                username={user?.username}
+                onNavigateToLogin={() => navigateToScreen('login')}
+                onNavigateToRegister={() => navigateToScreen('signin')}
+              />
+            </div>
+            
+            {/* 🗺️ マップ画面へ進むボタン（テスト用） */}
             <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
               <button
-                onClick={() => setCurrentScreen('before_record')}
+                onClick={() => navigateToScreen('before_record')}
                 style={{
                   width: '100%',
                   padding: '14px 20px',
@@ -91,16 +156,62 @@ function MainExperience() {
               </button>
             </div>
           </div>
-        ) : (
-          // マップ ＋ 記録前画面
-          <>
+        )}
+
+        {/* 2. 認証画面 */}
+        {(currentScreen === 'login' || currentScreen === 'signin') && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Auth
+              mode={currentScreen === 'login' ? 'login' : 'register'}
+              onNavigateToLogin={() => navigateToScreen('login')}
+              onNavigateToRegister={() => navigateToScreen('signin')}
+              onStartWithoutAuth={() => navigateToScreen('home')}
+              onAuthSuccess={handleAuthSuccess}
+            />
+          </div>
+        )}
+
+        {/* 4. 記録前画面 ＆ マップ */}
+        {currentScreen === 'before_record' && (
+          <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
               <MapView position={position} hasLocation={hasLocation} />
             </div>
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 10, pointerEvents: 'none' }}>
-              <BeforeRecord hasLocation={hasLocation} onStartRecording={handleStartRecording} />
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              pointerEvents: 'none',
+              padding: '16px',
+              boxSizing: 'border-box'
+            }}>
+              <BeforeRecord 
+                hasLocation={hasLocation} 
+                onStartRecording={handleStartRecording} 
+                onOpenSetting={() => navigateToScreen('setting')}
+              />
             </div>
-          </>
+          </div>
+        )}
+
+        {/* 5. 設定画面 */}
+        {currentScreen === 'setting' && (
+          <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
+            <Setting 
+              initialColor={userColor}
+              onBack={() => navigateToScreen('before_record')}
+              onSaveAndReturn={(selectedColor) => {
+                setUserColor(selectedColor);
+                navigateToScreen('before_record');
+              }}
+            />
+          </div>
         )}
 
       </div>

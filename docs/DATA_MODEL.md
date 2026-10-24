@@ -34,7 +34,7 @@
 | `users.id` ほか全ID | `BIGSERIAL`（int64） | **DB** | 内部参照 |
 | `rooms.code` | 6文字。`A-HJ-NP-Z2-9`（`I` `O` `0` `1` を除く32文字） | サーバー | **URL・QRで共有するのはこれ。`id` は外に出さない** |
 | セッション | HttpOnly Cookie（HMAC-SHA256 署名） | サーバー | 本人の特定。WSのハンドシェイクにも自動で乗る |
-| `username` | 3〜20文字 `[a-z0-9_]`、**小文字で保存**、UNIQUE | ユーザー入力 | ログイン |
+| `username` | 3〜16文字 `[a-z0-9_]`、**小文字で保存**、UNIQUE | ユーザー入力 | ログイン |
 
 - 部屋コードの正規表現は**サーバーとクライアントで同一**: `^[A-HJ-NP-Z2-9]{6}$`
 - 入力は常に `toUpperCase()` してから判定する
@@ -189,7 +189,7 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 | `POST /api/auth/logout` | — | `204` | — |
 | `GET /api/auth/me` | — | `200 {user}` | `401 unauthorized` |
 
-登録時の `username` は3〜20文字の英数字または `_`（大文字は小文字に正規化）、
+登録時の `username` は3〜16文字の英数字または `_`（大文字は小文字に正規化）、
 `password` は8〜72バイトとする。ログインと登録はいずれも `{username, password}` を受け取る。
 
 ```json
@@ -234,7 +234,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 - 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭）
 - `GET /api/rooms/{code}` は存在確認だけ。**軌跡は返さない**（それは `snapshot` の仕事）
 - `POST .../join` は**冪等**。すでに参加済みなら既存の member を返す
-- `title` は1〜40文字 / `displayName` は1〜16文字
+- `title` は前後の空白を除いて1〜40文字 / `displayName` は前後の空白を除いて1〜16文字
 
 ### 管理（owner のみ）
 

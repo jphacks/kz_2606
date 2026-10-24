@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, Scan } from 'lucide-react';
+import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, Scan, LogIn, UserPlus } from 'lucide-react';
 import QRCode from 'qrcode';
 
-export default function Home() {
+interface HomeProps {
+  onNavigateToLogin?: () => void;
+  onNavigateToRegister?: () => void;
+  username?: string;
+}
+
+export default function Home({ onNavigateToLogin, onNavigateToRegister, username }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [inviteQrCode, setInviteQrCode] = useState<string | null>(null);
   const [qrCodeError, setQrCodeError] = useState<string | null>(null);
@@ -43,7 +49,37 @@ export default function Home() {
           <Waypoints size={28} strokeWidth={2.5} />
           <span className="text-xl font-bold tracking-wider text-gray-900">まちえ</span>
         </div>
-        <button className="text-sm text-[#0E7861] font-medium">使い方</button>
+
+        {/* 右側のエリア：認証状態 ＆ 使い方 */}
+        <div className="flex items-center gap-3">
+          {username ? (
+            <span className="text-xs font-bold text-[#0E7861]">{username}</span>
+          ) : (
+            <>
+              {onNavigateToLogin && (
+                <button
+                  onClick={onNavigateToLogin}
+                  className="bg-[#0E7861]/10 hover:bg-[#0E7861]/20 text-[#0E7861] border border-[#0E7861]/30 text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                >
+                  <LogIn size={14} />
+                  <span>ログイン</span>
+                </button>
+              )}
+
+              {onNavigateToRegister && (
+                <button
+                  onClick={onNavigateToRegister}
+                  className="bg-[#0E7861] text-white text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
+                >
+                  <UserPlus size={14} />
+                  <span>登録</span>
+                </button>
+              )}
+            </>
+          )}
+
+          <button className="text-sm text-[#0E7861] font-medium ml-1">使い方</button>
+        </div>
       </header>
 
       {/* --- メインコンテンツ --- */}
@@ -81,7 +117,7 @@ export default function Home() {
 
           <div className="grid grid-cols-2 gap-4">
             {/* 一人ではじめる ボタン */}
-            <button className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition">
+            <button className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition cursor-pointer">
               <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
                 <Footprints size={24} />
               </div>
@@ -94,7 +130,7 @@ export default function Home() {
             {/* チームではじめる ボタン */}
             <button 
               onClick={() => setIsModalOpen(true)}
-              className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition"
+              className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition cursor-pointer"
             >
               <div className="bg-[#0E7861] p-3 rounded-full text-white">
                 <Flag size={24} />
@@ -107,7 +143,10 @@ export default function Home() {
           </div>
 
           {/* 活動履歴を見る ボタン */}
-          <button className="w-full mt-4 bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex items-center gap-4 active:bg-gray-50 transition">
+          <button
+            onClick={() => window.location.assign('/result')}
+            className="w-full mt-4 bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex items-center gap-4 active:bg-gray-50 transition cursor-pointer"
+          >
             <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
               <History size={24} />
             </div>
@@ -143,7 +182,7 @@ export default function Home() {
             </div>
             <button 
               onClick={() => setIsModalOpen(false)}
-              className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition"
+              className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition cursor-pointer"
               aria-label="閉じる"
             >
               <X size={20} />
@@ -162,7 +201,7 @@ export default function Home() {
               />
             </div>
             <button 
-              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md"
+              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md cursor-pointer"
               tabIndex={isModalOpen ? 0 : -1}
             >
               <Plus size={20} />
@@ -195,7 +234,7 @@ export default function Home() {
 
             {/* QRコードをスキャンボタン[cite: 2] */}
             <button 
-              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition shadow-sm"
+              className="w-full bg-white border border-[#0E7861] text-[#0E7861] font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#EBF5F3] transition shadow-sm cursor-pointer"
               tabIndex={isModalOpen ? 0 : -1}
             >
               <Scan size={20} />

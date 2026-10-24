@@ -14,6 +14,7 @@ import (
 	"github.com/jphacks/kz_2606/backend/internal/infrastructure/config"
 	"github.com/jphacks/kz_2606/backend/internal/infrastructure/persistence"
 	"github.com/jphacks/kz_2606/backend/internal/interface/rest"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -52,10 +53,16 @@ func run() error {
 		auth.Hasher{},
 		sessionCodec,
 	)
-	mux := rest.NewRouter(authService, rest.CookieOptions{
-		Secure:   cfg.CookieSecure,
-		Lifetime: auth.SessionLifetime,
-	})
+	roomService := usecase.NewRoomService(persistence.NewRoomRepository(pool))
+	mux := rest.NewRouter(
+		authService,
+		roomService,
+		rest.CookieOptions{
+			Secure:   cfg.CookieSecure,
+			Lifetime: auth.SessionLifetime,
+		},
+	)
+	mux.Handle("/ws", ws.NewHandler(authService, roomService, ws.NewRegistry()))
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

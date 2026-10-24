@@ -1,5 +1,13 @@
 package domain
 
-// ドメインエラー。上の層は errors.Is で判別して HTTP ステータスに変換する。
-//
-// TODO: ErrRoomNotFound / ErrInvalidRoomCode / ErrMemberNotFound
+import "errors"
+
+var (
+	ErrRoomNotFound     = errors.New("room not found")
+	ErrInvalidRoomCode  = errors.New("invalid room code")
+	ErrInvalidRoomTitle = errors.New("invalid room title")
+	ErrMemberNotFound   = errors.New("member not found")
+	ErrRouteNotFound    = errors.New("route not found")
+	ErrForbidden        = errors.New("forbidden")
+	ErrCannotBanOwner   = errors.New("cannot ban room owner")
+)

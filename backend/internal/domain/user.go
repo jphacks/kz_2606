@@ -20,7 +20,7 @@ type User struct {
 }
 
 func ParseUsername(value string) (string, error) {
-	if len(value) < 3 || len(value) > 20 {
+	if len(value) < 3 || len(value) > 16 {
 		return "", ErrInvalidUsername
 	}
 	for _, char := range value {

@@ -1,21 +1,33 @@
-// src/ui/Auth.tsx
-import { useState } from 'react';
+import type { User } from '../lib/types';
 import Login from './login';
 import Register from './signin';
 
-export default function Auth() {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const startWithoutAuth = () => window.location.assign('/');
+interface AuthProps {
+  mode: 'login' | 'register';
+  onNavigateToLogin: () => void;
+  onNavigateToRegister: () => void;
+  onStartWithoutAuth: () => void;
+  onAuthSuccess: (user: User) => void;
+}
 
+export default function Auth({
+  mode,
+  onNavigateToLogin,
+  onNavigateToRegister,
+  onStartWithoutAuth,
+  onAuthSuccess,
+}: AuthProps) {
   return mode === 'login' ? (
     <Login
-      onNavigateToRegister={() => setMode('register')}
-      onStartWithoutAuth={startWithoutAuth}
+      onNavigateToRegister={onNavigateToRegister}
+      onStartWithoutAuth={onStartWithoutAuth}
+      onLoginSuccess={onAuthSuccess}
     />
   ) : (
     <Register
-      onNavigateToLogin={() => setMode('login')}
-      onStartWithoutAuth={startWithoutAuth}
+      onNavigateToLogin={onNavigateToLogin}
+      onStartWithoutAuth={onStartWithoutAuth}
+      onRegisterSuccess={onAuthSuccess}
     />
   );
 }
