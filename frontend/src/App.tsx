@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
-import Auth from './ui/signin';
 import Result from './ui/result';
 import Auth from './ui/Auth';
 
@@ -13,7 +12,7 @@ export default function App() {
     return <Auth />;
   }
 
-    if (path === '/result') {
+  if (path === '/result') {
     return <Result />;
   }
 
