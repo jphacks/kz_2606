@@ -378,6 +378,23 @@ func TestPrivateRoomRejectsOtherMembers(t *testing.T) {
 	}
 }
 
+func TestGetPrivateRoomHidesItsExistence(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "owner_1")
+	room, _, err := repository.Create(context.Background(), domain.User{ID: 1, Username: "owner_1"}, "PRAV23", "owner_1のルーム")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room.IsPrivate = true
+	repository.rooms[room.Code] = room
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code, nil))
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"room_not_found"`) {
+		t.Fatalf("get private room = %d %s; want room_not_found 404", response.Code, response.Body)
+	}
+}
+
 func TestRoomCreationRequiresLoginAndValidTitle(t *testing.T) {
 	router, _ := newRoomTestRouter()
 	unauthorized := httptest.NewRecorder()

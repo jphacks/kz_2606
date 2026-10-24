@@ -75,6 +75,10 @@ func (h *roomHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		return
 	}
+	if room.IsPrivate {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "部屋が見つかりません")
+		return
+	}
 	writeJSON(w, http.StatusOK, struct {
 		Room roomResponse `json:"room"`
 	}{Room: toRoomResponse(room)})

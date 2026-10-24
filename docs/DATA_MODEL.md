@@ -188,9 +188,9 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 | メソッド・パス | リクエスト | 成功 | エラー |
 |---|---|---|---|
 | `POST /api/auth/register` | `{username, password}` | `200 {user, room}` + Cookie | `400 invalid_username` / `400 invalid_password` / `409 username_taken` |
-| `POST /api/auth/login` | `{username, password}` | `200 {user}` + Cookie | `400 invalid_format` / **`401 invalid_credentials`** |
+| `POST /api/auth/login` | `{username, password}` | `200 {user, room}` + Cookie | `400 invalid_format` / **`401 invalid_credentials`** |
 | `POST /api/auth/logout` | — | `204` | — |
-| `GET /api/auth/me` | — | `200 {user}` | `401 unauthorized` |
+| `GET /api/auth/me` | — | `200 {user, room}` | `401 unauthorized` |
 
 登録時の `username` は3〜16文字の英数字または `_`（大文字は小文字に正規化）、
 `password` は8〜72バイトとする。ログインと登録はいずれも `{username, password}` を受け取る。
@@ -214,6 +214,7 @@ ALTER TABLE rooms ADD COLUMN IF NOT EXISTS goal JSONB;
 
 > **`GET /api/auth/me` はフロントの起動時に必ず叩く。**
 > これが無いとリロードでログイン状態が消える（Cookieは残っているのに自分が誰か分からない）。
+> 登録・ログイン・`/me` はいずれも個人ルームを含めて返すため、別端末やリロード後も部屋コードを復元できる。
 
 ### Cookie
 

@@ -102,6 +102,15 @@ func (r *testUsers) FindByID(_ context.Context, id int64) (domain.User, error) {
 	return domain.User{}, domain.ErrUserNotFound
 }
 
+func (r *testUsers) FindPersonalRoom(_ context.Context, ownerUserID int64) (domain.Room, error) {
+	for _, room := range r.rooms {
+		if room.OwnerUserID == ownerUserID && room.IsPrivate {
+			return room, nil
+		}
+	}
+	return domain.Room{}, domain.ErrRoomNotFound
+}
+
 type testHasher struct{}
 
 func (testHasher) Hash(password string) (string, error) {
@@ -185,7 +194,9 @@ func TestAuthEndpoints(t *testing.T) {
 	meRequest.AddCookie(cookies[0])
 	me := httptest.NewRecorder()
 	router.ServeHTTP(me, meRequest)
-	if me.Code != http.StatusOK || !strings.Contains(me.Body.String(), `"username":"taro_1"`) {
+	if me.Code != http.StatusOK ||
+		!strings.Contains(me.Body.String(), `"username":"taro_1"`) ||
+		!strings.Contains(me.Body.String(), `"code":"`+registered.Room.Code+`"`) {
 		t.Fatalf("me response = %d %s", me.Code, me.Body)
 	}
 
@@ -210,6 +221,16 @@ func TestAuthEndpoints(t *testing.T) {
 	router.ServeHTTP(login, postJSON("/api/auth/login", `{"username":"taro_1","password":"password123"}`))
 	if login.Code != http.StatusOK {
 		t.Fatalf("login response = %d %s", login.Code, login.Body)
+	}
+	var loggedIn struct {
+		User apiUser      `json:"user"`
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(login.Body.Bytes(), &loggedIn); err != nil {
+		t.Fatal(err)
+	}
+	if loggedIn.User.ID != registered.User.ID || loggedIn.Room.Code != registered.Room.Code {
+		t.Fatalf("login response = %+v; want registered user and personal room", loggedIn)
 	}
 	if loginCookies := login.Result().Cookies(); len(loginCookies) != 1 || loginCookies[0].Name != sessionCookieName {
 		t.Fatalf("login session cookie = %+v", loginCookies)

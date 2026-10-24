@@ -102,7 +102,11 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (Aut
 	if err != nil {
 		return AuthResult{}, err
 	}
-	return AuthResult{User: user, Token: token}, nil
+	room, err := s.users.FindPersonalRoom(ctx, user.ID)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{User: user, Room: room, Token: token}, nil
 }
 
 func (s *AuthService) Me(ctx context.Context, token string) (domain.User, error) {
@@ -118,4 +122,8 @@ func (s *AuthService) Me(ctx context.Context, token string) (domain.User, error)
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func (s *AuthService) PersonalRoom(ctx context.Context, ownerUserID int64) (domain.Room, error) {
+	return s.users.FindPersonalRoom(ctx, ownerUserID)
 }

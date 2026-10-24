@@ -37,6 +37,10 @@ func (emptyUsers) FindByID(context.Context, int64) (domain.User, error) {
 	return domain.User{}, domain.ErrUserNotFound
 }
 
+func (emptyUsers) FindPersonalRoom(context.Context, int64) (domain.Room, error) {
+	return domain.Room{}, domain.ErrRoomNotFound
+}
+
 type stubSessions struct{}
 
 func (stubSessions) Encode(int64) (string, error) { return "token", nil }

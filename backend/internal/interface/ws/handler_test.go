@@ -36,6 +36,10 @@ func (testUsers) FindByID(_ context.Context, id int64) (domain.User, error) {
 	return domain.User{ID: id, Username: "walker"}, nil
 }
 
+func (testUsers) FindPersonalRoom(context.Context, int64) (domain.Room, error) {
+	return domain.Room{}, domain.ErrRoomNotFound
+}
+
 type testPasswordHasher struct{}
 
 func (testPasswordHasher) Hash(string) (string, error)  { return "", nil }
