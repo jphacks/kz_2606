@@ -117,18 +117,22 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *roomHandler) currentUser(w http.ResponseWriter, r *http.Request) (domain.User, bool) {
+	return authenticatedUser(w, r, h.auth)
+}
+
+func authenticatedUser(w http.ResponseWriter, r *http.Request, authService *usecase.AuthService) (domain.User, bool) {
 	cookie, err := r.Cookie(sessionCookieName)
 	if err != nil {
 		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")
 		return domain.User{}, false
 	}
-	user, err := h.auth.Me(r.Context(), cookie.Value)
+	user, err := authService.Me(r.Context(), cookie.Value)
 	if err != nil {
 		if errors.Is(err, usecase.ErrUnauthorized) {
 			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")
 			return domain.User{}, false
 		}
-		slog.Error("authenticate room request failed", "err", err)
+		slog.Error("authenticate request failed", "err", err)
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		return domain.User{}, false
 	}

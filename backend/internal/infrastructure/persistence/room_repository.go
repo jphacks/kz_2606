@@ -91,8 +91,176 @@ func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, di
 	return room, member, nil
 }
 
+func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if ownerUserID != userID {
+		return time.Time{}, domain.ErrForbidden
+	}
+	var closedAt time.Time
+	err = tx.QueryRow(ctx, `
+		UPDATE rooms
+		SET closed_at = COALESCE(closed_at, now())
+		WHERE id = $1
+		RETURNING closed_at
+	`, roomID).Scan(&closedAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE routes
+		SET ended_at = $2
+		WHERE room_id = $1 AND ended_at IS NULL
+	`, roomID, closedAt); err != nil {
+		return time.Time{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return time.Time{}, err
+	}
+	return closedAt, nil
+}
+
+func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
+	if err != nil {
+		return err
+	}
+	if ownerUserID != userID {
+		return domain.ErrForbidden
+	}
+	if _, err := tx.Exec(ctx, `UPDATE rooms SET closed_at = NULL WHERE id = $1`, roomID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *RoomRepository) Ban(ctx context.Context, code string, userID, memberID int64) error {
+	return r.setBanned(ctx, code, userID, memberID, true)
+}
+
+func (r *RoomRepository) Unban(ctx context.Context, code string, userID, memberID int64) error {
+	return r.setBanned(ctx, code, userID, memberID, false)
+}
+
+func (r *RoomRepository) setBanned(ctx context.Context, code string, userID, memberID int64, banned bool) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
+	if err != nil {
+		return err
+	}
+	if ownerUserID != userID {
+		return domain.ErrForbidden
+	}
+	var targetUserID int64
+	err = tx.QueryRow(ctx, `
+		SELECT user_id
+		FROM members
+		WHERE id = $1 AND room_id = $2
+		FOR UPDATE
+	`, memberID, roomID).Scan(&targetUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrMemberNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if targetUserID == ownerUserID {
+		return domain.ErrCannotBanOwner
+	}
+	if banned {
+		_, err = tx.Exec(ctx, `
+			UPDATE members SET banned_at = COALESCE(banned_at, now())
+			WHERE id = $1
+		`, memberID)
+	} else {
+		_, err = tx.Exec(ctx, `UPDATE members SET banned_at = NULL WHERE id = $1`, memberID)
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *RoomRepository) DeleteRoute(ctx context.Context, code string, userID, routeID int64) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
+	if err != nil {
+		return err
+	}
+	var routeUserID int64
+	err = tx.QueryRow(ctx, `
+		SELECT members.user_id
+		FROM routes
+		JOIN members ON members.id = routes.member_id
+		WHERE routes.id = $1 AND routes.room_id = $2
+		FOR UPDATE OF routes
+	`, routeID, roomID).Scan(&routeUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.ErrRouteNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if userID != ownerUserID && userID != routeUserID {
+		return domain.ErrForbidden
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM routes WHERE id = $1 AND room_id = $2`, routeID, roomID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 type queryRower interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func lockRoomOwner(ctx context.Context, tx pgx.Tx, code string) (int64, int64, error) {
+	var roomID, ownerUserID int64
+	err := tx.QueryRow(ctx, `
+		SELECT id, owner_user_id
+		FROM rooms
+		WHERE code = $1
+		FOR UPDATE
+	`, code).Scan(&roomID, &ownerUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, 0, domain.ErrRoomNotFound
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return roomID, ownerUserID, nil
 }
 
 func findRoomByCode(ctx context.Context, q queryRower, code string) (domain.Room, error) {
