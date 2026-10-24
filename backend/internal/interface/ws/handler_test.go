@@ -2,6 +2,7 @@ package ws
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -102,8 +103,30 @@ func TestHandlerAuthenticatesRoomMemberAndSendsSnapshot(t *testing.T) {
 	}
 	defer conn.Close()
 
+	_, payload, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatal(err)
+	}
+	rawRoutes, ok := raw["routes"].([]any)
+	if !ok || len(rawRoutes) != 1 {
+		t.Fatalf("snapshot routes = %v; want one route", raw["routes"])
+	}
+	rawRoute, ok := rawRoutes[0].(map[string]any)
+	if !ok {
+		t.Fatalf("snapshot route has unexpected shape: %v", rawRoutes[0])
+	}
+	if _, ok := rawRoute["member"]; !ok {
+		t.Fatalf("routes[].member is missing: %v", rawRoute)
+	}
+	if _, ok := rawRoute["pts"]; !ok {
+		t.Fatalf("routes[].pts is missing: %v", rawRoute)
+	}
 	var snapshot snapshotDTO
-	if err := conn.ReadJSON(&snapshot); err != nil {
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.Type != "snapshot" || snapshot.Room.Code != "KZ26AB" {
