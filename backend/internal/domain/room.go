@@ -1,11 +1,54 @@
 package domain
 
-// Room 集約。コード・メンバー・route・軌跡を持ち、状態遷移のルールを持つ。
-// **並行制御はしない**（usecase/session.go が goroutine 1本で直列化する）。
-// 仕様: DATA_MODEL.md 7章・8章
-//
-// TODO: Room{ID, Code, Title, OwnerUserID, ClosedAt, Members, Routes, Active}
-// TODO: Join / Leave / UpdateMember / Ban / Unban / Close / Reopen
-// TODO: StartRoute / AddPoints / EndRoute / DeleteRoute
-// TODO: Clone()  ← snapshot 用。実体を外に出さないために必須
-// TODO: CanWrite() / IsOwner()
+import (
+	"crypto/rand"
+	"errors"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+var ErrRoomCodeTaken = errors.New("room code already taken")
+
+const roomCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+type Room struct {
+	ID            int64
+	Code          string
+	Title         string
+	OwnerMemberID int64
+	ClosedAt      *time.Time
+}
+
+func ValidateRoomTitle(title string) error {
+	title = strings.TrimSpace(title)
+	if utf8.RuneCountInString(title) < 1 || utf8.RuneCountInString(title) > 40 {
+		return ErrInvalidRoomTitle
+	}
+	return nil
+}
+
+func NormalizeRoomCode(code string) (string, error) {
+	code = strings.ToUpper(code)
+	if len(code) != 6 {
+		return "", ErrInvalidRoomCode
+	}
+	for _, char := range code {
+		if !strings.ContainsRune(roomCodeAlphabet, char) {
+			return "", ErrInvalidRoomCode
+		}
+	}
+	return code, nil
+}
+
+func NewRoomCode() (string, error) {
+	randomBytes := make([]byte, 6)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	code := make([]byte, len(randomBytes))
+	for i, value := range randomBytes {
+		code[i] = roomCodeAlphabet[value&31]
+	}
+	return string(code), nil
+}

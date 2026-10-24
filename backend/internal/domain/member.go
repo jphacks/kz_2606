@@ -1,6 +1,40 @@
 package domain
 
-// Member エンティティ。名前と線の色を持つ。
-// 名前の長さ・色の形式の正規化はここ（クライアント申告値を信用しない）。
-//
-// TODO: Member{ID, Name, Color} / NewMember / Normalize / Palette
+import (
+	"errors"
+	"regexp"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+var (
+	ErrMemberBanned       = errors.New("member is banned")
+	ErrInvalidDisplayName = errors.New("invalid display name")
+	ErrInvalidColor       = errors.New("invalid color")
+)
+
+const FirstMemberColor = "#00e5ff"
+
+var memberColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+type Member struct {
+	ID          int64
+	DisplayName string
+	Color       string
+	BannedAt    *time.Time
+}
+
+func ValidateDisplayName(displayName string) error {
+	if strings.TrimSpace(displayName) == "" || utf8.RuneCountInString(displayName) > 16 {
+		return ErrInvalidDisplayName
+	}
+	return nil
+}
+
+func NormalizeColor(color string) (string, error) {
+	if !memberColorPattern.MatchString(color) {
+		return "", ErrInvalidColor
+	}
+	return strings.ToLower(color), nil
+}

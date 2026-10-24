@@ -94,7 +94,7 @@ func postJSON(target, body string) *http.Request {
 }
 
 func TestAuthEndpoints(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"Taro_1","password":"password123"}`))
@@ -141,7 +141,7 @@ func TestAuthEndpoints(t *testing.T) {
 }
 
 func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/login", `{"username":"missing","password":"password123"}`))
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"invalid_credentials"`) {
@@ -150,7 +150,7 @@ func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
 }
 
 func TestRegisterRejectsInvalidCredentials(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"ab","password":"short"}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
@@ -159,7 +159,7 @@ func TestRegisterRejectsInvalidCredentials(t *testing.T) {
 }
 
 func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":""}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_password"`) {
@@ -168,7 +168,7 @@ func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
 }
 
 func TestRegisterRejectsNonJSONContentType(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
 		request := httptest.NewRequest(
 			http.MethodPost,
@@ -192,7 +192,7 @@ func TestRegisterRejectsNonJSONContentType(t *testing.T) {
 }
 
 func TestLoginAcceptsUnknownFields(t *testing.T) {
-	router := NewRouter(newTestAuthService(), testCookies)
+	router := NewRouter(newTestAuthService(), nil, testCookies)
 	register := httptest.NewRecorder()
 	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	if register.Code != http.StatusOK {
@@ -206,7 +206,7 @@ func TestLoginAcceptsUnknownFields(t *testing.T) {
 }
 
 func TestCookieSecureIsConfigurable(t *testing.T) {
-	router := NewRouter(newTestAuthService(), CookieOptions{Secure: false, Lifetime: time.Hour})
+	router := NewRouter(newTestAuthService(), nil, CookieOptions{Secure: false, Lifetime: time.Hour})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
 	cookies := response.Result().Cookies()
