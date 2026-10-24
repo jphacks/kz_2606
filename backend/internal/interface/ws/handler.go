@@ -1,6 +1,8 @@
 package ws
 
-// upgrade → 1通目の join を検証 → SessionService に参加させる。
-// 仕様: DATA_MODEL.md 5章
+// WebSocket のハンドシェイク。
+// Cookie から本人を特定し、?room=CODE の member でなければ 403 で切る。
+// クライアント申告のIDは一切受け取らない。接続直後に snapshot を送る。
+// 仕様: DATA_MODEL.md 6章
 //
 // TODO: Handler / ServeHTTP / upgrader

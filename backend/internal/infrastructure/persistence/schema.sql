@@ -3,33 +3,53 @@
 -- 列を足すときは ALTER TABLE ... ADD COLUMN IF NOT EXISTS を追記する。
 -- 仕様: DATA_MODEL.md 4章
 
+CREATE TABLE IF NOT EXISTS users (
+    id            BIGSERIAL PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,   -- 小文字で保存
+    password_hash TEXT NOT NULL,          -- bcrypt
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS rooms (
-    code       TEXT PRIMARY KEY,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id            BIGSERIAL PRIMARY KEY,
+    code          TEXT NOT NULL UNIQUE,   -- 6文字。URL/QRで共有するのはこれ（id は外に出さない）
+    title         TEXT NOT NULL,
+    owner_user_id BIGINT NOT NULL REFERENCES users (id),
+    closed_at     TIMESTAMPTZ,            -- NULL = 進行中
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 主キーは (room_code, id)。member.id は端末の localStorage 由来なので、
--- 同じ端末が複数の部屋に入ることがある。
 CREATE TABLE IF NOT EXISTS members (
-    room_code TEXT NOT NULL REFERENCES rooms (code) ON DELETE CASCADE,
-    id        TEXT NOT NULL,
-    name      TEXT NOT NULL,
-    color     TEXT NOT NULL,
-    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY (room_code, id)
+    id           BIGSERIAL PRIMARY KEY,
+    room_id      BIGINT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+    user_id      BIGINT NOT NULL REFERENCES users (id),
+    display_name TEXT NOT NULL,
+    color        TEXT NOT NULL,           -- #rrggbb
+    joined_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    banned_at    TIMESTAMPTZ,             -- NULL = 参加中
+    UNIQUE (room_id, user_id)             -- 再入室・リロードが冪等になる
 );
 
--- 外部キーを張らない: メンバーの保存が非同期なので points が先に来る。
--- CopyFrom も FK 検査があると遅くなる。
+-- routes = 1メンバーの1回の記録。記録開始で作り、終了で ended_at を埋める。
+-- 記録開始時に同期で作るので points より必ず先に存在する → 外部キーを張れる。
+CREATE TABLE IF NOT EXISTS routes (
+    id         BIGSERIAL PRIMARY KEY,
+    room_id    BIGINT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
+    member_id  BIGINT NOT NULL REFERENCES members (id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at   TIMESTAMPTZ              -- NULL = 記録中
+);
+
+CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
+
+-- points は route_id だけで辿れる（member_id は routes から引ける）
 CREATE TABLE IF NOT EXISTS points (
     id          BIGSERIAL PRIMARY KEY,
-    room_code   TEXT NOT NULL,
-    member_id   TEXT NOT NULL,
-    lat         DOUBLE PRECISION NOT NULL,
-    lng         DOUBLE PRECISION NOT NULL,
+    route_id    BIGINT NOT NULL REFERENCES routes (id) ON DELETE CASCADE,
+    latitude    DOUBLE PRECISION NOT NULL,
+    longitude   DOUBLE PRECISION NOT NULL,
     accuracy    REAL,
     recorded_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS points_room_member_time
-    ON points (room_code, member_id, recorded_at);
+CREATE INDEX IF NOT EXISTS points_route_time ON points (route_id, recorded_at);

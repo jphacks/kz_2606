@@ -1,6 +1,6 @@
+import Home from "./ui/home";
 import Login from "./ui/login";
 
 export default function App() {
-  // TODO: ?room=CODE があれば RoomView、無ければ JoinScreen
-  return <Login />;
+  return window.location.pathname === "/login" ? <Login /> : <Home />;
 }
