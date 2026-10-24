@@ -1,5 +1,3 @@
-import React from 'react';
-
 interface BeforeRecordProps {
   hasLocation: boolean;
   onStartRecording?: () => void;
