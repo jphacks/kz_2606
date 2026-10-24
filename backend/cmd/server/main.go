@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+
+	"github.com/jphacks/kz_2606/backend/internal/interface/rest"
 )
 
 // エントリポイント。ここは配線（DI）だけ。ロジックを書かない。
@@ -15,7 +17,7 @@ import (
 //	sessions := usecase.NewSessionService(rooms, points, registry)
 //	mux      := rest.NewRouter(usecase.NewRoomService(rooms), sessions, registry, staticFS())
 func main() {
-	mux := http.NewServeMux()
+	mux := rest.NewRouter()
 
 	// TODO: 上記の配線
 
@@ -25,6 +27,7 @@ func main() {
 		slog.Error("listen failed", "err", err)
 		os.Exit(1)
 	}
+
 }
 
 func env(key, def string) string {
