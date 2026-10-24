@@ -7,6 +7,11 @@ import (
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
 
+const (
+	maxPersonalRoomCodeAttempts = 5
+	personalRoomTitleSuffix     = "のルーム"
+)
+
 var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrPasswordMismatch   = errors.New("password mismatch")
@@ -15,6 +20,7 @@ var (
 
 type AuthResult struct {
 	User  domain.User
+	Room  domain.Room
 	Token string
 }
 
@@ -41,15 +47,33 @@ func (s *AuthService) Register(ctx context.Context, username, password string) (
 	if err != nil {
 		return AuthResult{}, err
 	}
-	user, err := s.users.Create(ctx, normalizedUsername, passwordHash)
-	if err != nil {
-		return AuthResult{}, err
+	title := normalizedUsername + personalRoomTitleSuffix
+	var user domain.User
+	var room domain.Room
+	created := false
+	for range maxPersonalRoomCodeAttempts {
+		code, err := domain.NewRoomCode()
+		if err != nil {
+			return AuthResult{}, err
+		}
+		user, room, _, err = s.users.CreateWithPersonalRoom(ctx, normalizedUsername, passwordHash, code, title)
+		if errors.Is(err, domain.ErrRoomCodeTaken) {
+			continue
+		}
+		if err != nil {
+			return AuthResult{}, err
+		}
+		created = true
+		break
+	}
+	if !created {
+		return AuthResult{}, errors.New("could not allocate a unique room code")
 	}
 	token, err := s.sessions.Encode(user.ID)
 	if err != nil {
 		return AuthResult{}, err
 	}
-	return AuthResult{User: user, Token: token}, nil
+	return AuthResult{User: user, Room: room, Token: token}, nil
 }
 
 func (s *AuthService) Login(ctx context.Context, username, password string) (AuthResult, error) {
@@ -81,7 +105,11 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (Aut
 	if err != nil {
 		return AuthResult{}, err
 	}
-	return AuthResult{User: user, Token: token}, nil
+	room, err := s.ensurePersonalRoom(ctx, user)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{User: user, Room: room, Token: token}, nil
 }
 
 func (s *AuthService) Me(ctx context.Context, token string) (domain.User, error) {
@@ -97,4 +125,42 @@ func (s *AuthService) Me(ctx context.Context, token string) (domain.User, error)
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func (s *AuthService) PersonalRoom(ctx context.Context, user domain.User) (domain.Room, error) {
+	return s.ensurePersonalRoom(ctx, user)
+}
+
+// ensurePersonalRoom は個人ルームを返す。無ければ作る。
+// 個人ルームが導入される前に登録されたアカウントでもログインできるようにするため、
+// 「無い」を異常として扱わない。仕様: DATA_MODEL.md 5章
+func (s *AuthService) ensurePersonalRoom(ctx context.Context, user domain.User) (domain.Room, error) {
+	room, err := s.users.FindPersonalRoom(ctx, user.ID)
+	if err == nil {
+		return room, nil
+	}
+	if !errors.Is(err, domain.ErrRoomNotFound) {
+		return domain.Room{}, err
+	}
+
+	title := user.Username + personalRoomTitleSuffix
+	for range maxPersonalRoomCodeAttempts {
+		code, err := domain.NewRoomCode()
+		if err != nil {
+			return domain.Room{}, err
+		}
+		room, _, err := s.users.CreatePersonalRoom(ctx, user, code, title)
+		if err == nil {
+			return room, nil
+		}
+		if !errors.Is(err, domain.ErrRoomCodeTaken) {
+			return domain.Room{}, err
+		}
+		// コードの重複か、同時ログインで他の接続が先に作ったかのどちらか。
+		// 後者なら既に出来ているので、引き直して返す。
+		if existing, findErr := s.users.FindPersonalRoom(ctx, user.ID); findErr == nil {
+			return existing, nil
+		}
+	}
+	return domain.Room{}, errors.New("could not allocate a unique room code")
 }

@@ -15,9 +15,17 @@ CREATE TABLE IF NOT EXISTS rooms (
     code          TEXT NOT NULL UNIQUE,   -- 6文字。URL/QRで共有するのはこれ（id は外に出さない）
     title         TEXT NOT NULL,
     owner_user_id BIGINT NOT NULL REFERENCES users (id),
+    is_private    BOOLEAN NOT NULL DEFAULT false,
     closed_at     TIMESTAMPTZ,            -- NULL = 進行中
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT false;
+
+-- 個人ルームは1ユーザーにつき1つ。同時ログインで二重に作られるのを防ぐ。
+-- FindPersonalRoom の検索にもこの索引が使える。
+CREATE UNIQUE INDEX IF NOT EXISTS rooms_one_private_room_per_owner
+    ON rooms (owner_user_id) WHERE is_private;
 
 CREATE TABLE IF NOT EXISTS members (
     id           BIGSERIAL PRIMARY KEY,
@@ -41,6 +49,11 @@ CREATE TABLE IF NOT EXISTS routes (
 );
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
+
+-- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
+-- 複数人が同時に start を叩いても2本目が作られない。仕様: DATA_MODEL.md 7章
+CREATE UNIQUE INDEX IF NOT EXISTS routes_one_recording_per_room
+    ON routes (room_id) WHERE ended_at IS NULL;
 
 -- points は route_id だけで辿れる（member_id は routes から引ける）
 CREATE TABLE IF NOT EXISTS points (

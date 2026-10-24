@@ -33,8 +33,8 @@ func (r *RoomRepository) Create(ctx context.Context, owner domain.User, code, ti
 	err = tx.QueryRow(ctx, `
 		INSERT INTO rooms (code, title, owner_user_id)
 		VALUES ($1, $2, $3)
-		RETURNING id, code, title, created_at
-	`, code, title, owner.ID).Scan(&room.ID, &room.Code, &room.Title, &room.CreatedAt)
+		RETURNING id, code, title
+	`, code, title, owner.ID).Scan(&room.ID, &room.Code, &room.Title)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -48,6 +48,7 @@ func (r *RoomRepository) Create(ctx context.Context, owner domain.User, code, ti
 		return domain.Room{}, domain.Member{}, err
 	}
 	room.OwnerMemberID = ownerMember.ID
+	room.OwnerUserID = owner.ID
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
@@ -75,6 +76,9 @@ func (r *RoomRepository) Snapshot(ctx context.Context, code string, userID int64
 		return domain.RoomSnapshot{}, domain.Member{}, err
 	}
 
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrPrivateRoom
+	}
 	you, err := readMember(ctx, tx, room.ID, userID)
 	if err != nil {
 		return domain.RoomSnapshot{}, domain.Member{}, err
@@ -186,6 +190,9 @@ func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, di
 	room, err := findRoomByCode(ctx, tx, code)
 	if err != nil {
 		return domain.Room{}, domain.Member{}, err
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.Room{}, domain.Member{}, domain.ErrPrivateRoom
 	}
 
 	member, err := insertMember(ctx, tx, room.ID, userID, displayName, color)
@@ -403,11 +410,11 @@ func findRoomByCode(ctx context.Context, q queryRower, code string) (domain.Room
 	var room domain.Room
 	var closedAt pgtype.Timestamptz
 	err := q.QueryRow(ctx, `
-		SELECT rooms.id, rooms.code, rooms.title, members.id, rooms.created_at, rooms.closed_at
+		SELECT rooms.id, rooms.code, rooms.title, rooms.owner_user_id, members.id, rooms.is_private, rooms.closed_at
 		FROM rooms
 		JOIN members ON members.room_id = rooms.id AND members.user_id = rooms.owner_user_id
 		WHERE rooms.code = $1
-	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerMemberID, &room.CreatedAt, &closedAt)
+	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerUserID, &room.OwnerMemberID, &room.IsPrivate, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Room{}, domain.ErrRoomNotFound
 	}

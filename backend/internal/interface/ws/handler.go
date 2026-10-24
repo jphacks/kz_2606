@@ -58,7 +58,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	snapshot, you, err := h.rooms.Snapshot(r.Context(), roomCode, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, domain.ErrMemberNotFound), errors.Is(err, domain.ErrMemberBanned):
+		case errors.Is(err, domain.ErrMemberNotFound), errors.Is(err, domain.ErrMemberBanned), errors.Is(err, domain.ErrPrivateRoom):
 			http.Error(w, "この部屋に接続する権限がありません", http.StatusForbidden)
 		case errors.Is(err, domain.ErrInvalidRoomCode), errors.Is(err, domain.ErrRoomNotFound):
 			http.Error(w, "部屋が見つかりません", http.StatusNotFound)

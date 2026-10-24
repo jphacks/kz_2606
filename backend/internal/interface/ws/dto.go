@@ -15,6 +15,7 @@ type roomDTO struct {
 	Code          string     `json:"code"`
 	Title         string     `json:"title"`
 	OwnerMemberID int64      `json:"ownerMemberId"`
+	IsPrivate     bool       `json:"isPrivate"`
 	ClosedAt      *time.Time `json:"closedAt"`
 }
 
@@ -35,38 +36,32 @@ type memberDTO struct {
 }
 
 type routeDTO struct {
-	ID       int64        `json:"id"`
-	MemberID int64        `json:"member"`
-	Color    string       `json:"color"`
-	EndedAt  *time.Time   `json:"endedAt"`
-	Points   []pointTuple `json:"pts"`
-}
-
-type statsDTO struct {
-	Meters    float64   `json:"meters"`
-	Members   int       `json:"members"`
-	StartedAt time.Time `json:"startedAt"`
-	ElapsedMs int64     `json:"elapsedMs"`
+	ID        int64        `json:"id"`
+	MemberID  int64        `json:"member"`
+	Color     string       `json:"color"`
+	StartedAt time.Time    `json:"startedAt"`
+	EndedAt   *time.Time   `json:"endedAt"`
+	Meters    float64      `json:"meters"`
+	ElapsedMs int64        `json:"elapsedMs"`
+	Points    []pointTuple `json:"pts"`
 }
 
 type snapshotDTO struct {
 	Type    string      `json:"t"`
 	Room    roomDTO     `json:"room"`
 	You     youDTO      `json:"you"`
-	Stats   statsDTO    `json:"stats"`
 	Members []memberDTO `json:"members"`
 	Routes  []routeDTO  `json:"routes"`
 }
 
 func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry, now time.Time) snapshotDTO {
-	stats := snapshot.Stats(now)
 	memberByID := make(map[int64]domain.Member, len(snapshot.Members))
 	recordingByMember := make(map[int64]bool)
 	for _, member := range snapshot.Members {
 		memberByID[member.ID] = member
 	}
 	for _, route := range snapshot.Routes {
-		if route.EndedAt == nil {
+		if route.Recording() {
 			recordingByMember[route.MemberID] = true
 		}
 	}
@@ -90,12 +85,16 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 		for _, point := range route.Points {
 			points = append(points, pointTuple{point.Lat, point.Lng, point.TS, point.Acc})
 		}
+		stats := route.Stats(now)
 		routes = append(routes, routeDTO{
-			ID:       route.ID,
-			MemberID: route.MemberID,
-			Color:    memberByID[route.MemberID].Color,
-			EndedAt:  route.EndedAt,
-			Points:   points,
+			ID:        route.ID,
+			MemberID:  route.MemberID,
+			Color:     memberByID[route.MemberID].Color,
+			StartedAt: route.StartedAt,
+			EndedAt:   route.EndedAt,
+			Meters:    stats.Meters,
+			ElapsedMs: stats.Elapsed.Milliseconds(),
+			Points:    points,
 		})
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
@@ -107,6 +106,7 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			Code:          snapshot.Room.Code,
 			Title:         snapshot.Room.Title,
 			OwnerMemberID: snapshot.Room.OwnerMemberID,
+			IsPrivate:     snapshot.Room.IsPrivate,
 			ClosedAt:      snapshot.Room.ClosedAt,
 		},
 		You: youDTO{
@@ -114,12 +114,6 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			DisplayName: you.DisplayName,
 			Color:       you.Color,
 			IsOwner:     you.ID == snapshot.Room.OwnerMemberID,
-		},
-		Stats: statsDTO{
-			Meters:    stats.Meters,
-			Members:   stats.Members,
-			StartedAt: stats.StartedAt,
-			ElapsedMs: stats.Elapsed.Milliseconds(),
 		},
 		Members: members,
 		Routes:  routes,

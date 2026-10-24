@@ -16,8 +16,9 @@ type Room struct {
 	ID            int64
 	Code          string
 	Title         string
+	OwnerUserID   int64
 	OwnerMemberID int64
-	CreatedAt     time.Time
+	IsPrivate     bool
 	ClosedAt      *time.Time
 }
 
