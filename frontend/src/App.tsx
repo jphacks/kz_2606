@@ -20,7 +20,7 @@ export default function App() {
 }
 
 function MainExperience() {
-  // 現在表示している画面を管理する
+  // 今表示している画面を管理する
   const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record'>('home');
   
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
