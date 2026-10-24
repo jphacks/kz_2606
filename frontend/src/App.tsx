@@ -2,14 +2,18 @@ import { useEffect, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
+import Result from './ui/result';
 import Auth from './ui/Auth';
-
 
 export default function App() {
   const path = window.location.pathname;
 
   if (path === '/login' || path === '/signin') {
     return <Auth />;
+  }
+
+  if (path === '/result') {
+    return <Result />;
   }
 
   return <MainExperience />;

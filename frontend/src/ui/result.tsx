@@ -189,7 +189,10 @@ export default function Activity() {
         </div>
 
         {/* ホームに戻るボタン */}
-        <button className="w-full flex items-center justify-center gap-2 text-[#0e7861] font-bold py-3 hover:bg-[#EBF5F3] rounded-xl transition">
+        <button
+          onClick={() => window.location.assign('/')}
+          className="w-full flex items-center justify-center gap-2 text-[#0e7861] font-bold py-3 hover:bg-[#EBF5F3] rounded-xl transition"
+        >
           <Home size={18} />
           ホームに戻る
         </button>
