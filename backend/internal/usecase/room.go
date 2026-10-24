@@ -24,7 +24,8 @@ func NewRoomService(rooms RoomRepository) *RoomService {
 }
 
 func (s *RoomService) Create(ctx context.Context, owner domain.User, title string) (domain.Room, domain.Member, error) {
-	if err := domain.ValidateRoomTitle(title); err != nil {
+	normalizedTitle, err := domain.NormalizeRoomTitle(title)
+	if err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
 	for range maxRoomCodeAttempts {
@@ -32,7 +33,7 @@ func (s *RoomService) Create(ctx context.Context, owner domain.User, title strin
 		if err != nil {
 			return domain.Room{}, domain.Member{}, err
 		}
-		room, ownerMember, err := s.rooms.Create(ctx, owner, code, title)
+		room, ownerMember, err := s.rooms.Create(ctx, owner, code, normalizedTitle)
 		if errors.Is(err, domain.ErrRoomCodeTaken) {
 			continue
 		}

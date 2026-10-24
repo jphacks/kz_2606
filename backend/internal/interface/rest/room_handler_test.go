@@ -24,6 +24,35 @@ type testRoomRepository struct {
 	codeConflictsLeft int
 }
 
+func TestJoinRoomAllowsClosedRoomForReadOnlyViewing(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	ownerCookie := registerTestUser(t, router, "owner_1")
+	createdResponse := requestWithCookie(router, postJSON("/api/rooms", `{"title":"park"}`), ownerCookie)
+	var created struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Now()
+	room := repository.rooms[created.Room.Code]
+	room.ClosedAt = &closedAt
+	repository.rooms[created.Room.Code] = room
+
+	joinerCookie := registerTestUser(t, router, "joiner_1")
+	response := requestWithCookie(
+		router,
+		postJSON("/api/rooms/"+created.Room.Code+"/join", `{"displayName":"walker","color":"#ffffff"}`),
+		joinerCookie,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("closed room join response = %d %s", response.Code, response.Body)
+	}
+	if len(repository.members[created.Room.Code]) != 2 {
+		t.Fatalf("closed room join did not add the viewer: %+v", repository.members[created.Room.Code])
+	}
+}
+
 func newTestRoomRepository() *testRoomRepository {
 	return &testRoomRepository{
 		rooms:   make(map[string]domain.Room),
@@ -134,7 +163,9 @@ func TestCreateRoomPersistsRoomAndOwnerMember(t *testing.T) {
 
 	get := httptest.NewRecorder()
 	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/rooms/"+strings.ToLower(result.Room.Code), nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"title":"公園を歩こう"`) {
+	if get.Code != http.StatusOK ||
+		!strings.Contains(get.Body.String(), `"title":"公園を歩こう"`) ||
+		!strings.Contains(get.Body.String(), `"ownerMemberId":`) {
 		t.Fatalf("get room response = %d %s", get.Code, get.Body)
 	}
 }
@@ -150,6 +181,25 @@ func TestRoomCreationRequiresLoginAndValidTitle(t *testing.T) {
 	invalidTitle := requestWithCookie(router, postJSON("/api/rooms", `{"title":" "}`), cookie)
 	if invalidTitle.Code != http.StatusBadRequest || !strings.Contains(invalidTitle.Body.String(), `"code":"invalid_title"`) {
 		t.Fatalf("invalid title response = %d %s", invalidTitle.Code, invalidTitle.Body)
+	}
+}
+
+func TestCreateRoomTrimsTitleBeforePersisting(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	ownerCookie := registerTestUser(t, router, "owner_1")
+
+	response := requestWithCookie(router, postJSON("/api/rooms", `{"title":"  park  "}`), ownerCookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", response.Code, response.Body)
+	}
+	var result struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Room.Title != "park" || repository.rooms[result.Room.Code].Title != "park" {
+		t.Fatalf("room title = %q, persisted title = %q; want both trimmed", result.Room.Title, repository.rooms[result.Room.Code].Title)
 	}
 }
 

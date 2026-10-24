@@ -21,13 +21,13 @@ func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomServic
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", rootHandler)
 	handler := &authHandler{service: authService, cookies: cookies}
-	roomHandler := &roomHandler{auth: authService, rooms: roomService}
+	rooms := &roomHandler{auth: authService, rooms: roomService}
 	mux.HandleFunc("POST /api/auth/register", handler.register)
 	mux.HandleFunc("POST /api/auth/login", handler.login)
 	mux.HandleFunc("POST /api/auth/logout", handler.logout)
 	mux.HandleFunc("GET /api/auth/me", handler.me)
-	mux.HandleFunc("POST /api/rooms", roomHandler.create)
-	mux.HandleFunc("GET /api/rooms/{code}", roomHandler.get)
-	mux.HandleFunc("POST /api/rooms/{code}/join", roomHandler.join)
+	mux.HandleFunc("POST /api/rooms", rooms.create)
+	mux.HandleFunc("GET /api/rooms/{code}", rooms.get)
+	mux.HandleFunc("POST /api/rooms/{code}/join", rooms.join)
 	return mux
 }

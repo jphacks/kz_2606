@@ -234,7 +234,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 - 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭）
 - `GET /api/rooms/{code}` は存在確認だけ。**軌跡は返さない**（それは `snapshot` の仕事）
 - `POST .../join` は**冪等**。すでに参加済みなら既存の member を返す
-- `title` は1〜40文字 / `displayName` は1〜16文字
+- `title` は前後の空白を除いて1〜40文字 / `displayName` は1〜16文字
 
 ### 管理（owner のみ）
 

@@ -20,12 +20,12 @@ type Room struct {
 	ClosedAt      *time.Time
 }
 
-func ValidateRoomTitle(title string) error {
+func NormalizeRoomTitle(title string) (string, error) {
 	title = strings.TrimSpace(title)
 	if utf8.RuneCountInString(title) < 1 || utf8.RuneCountInString(title) > 40 {
-		return ErrInvalidRoomTitle
+		return "", ErrInvalidRoomTitle
 	}
-	return nil
+	return title, nil
 }
 
 func NormalizeRoomCode(code string) (string, error) {
