@@ -6,8 +6,9 @@ import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
 import { getCurrentSession } from './lib/api';
-import { distanceMeters, shouldAcceptPoint, trackGapMilliseconds } from './lib/geo';
-import { connectToRoom, sendPoints, sendStart, sendStop } from './lib/ws';
+import { shouldAcceptPoint } from './lib/geo';
+import { connectToRoom, flushIntervalMilliseconds, sendPoints, sendStart, sendStop } from './lib/ws';
+import { TrackBuffer } from './lib/track_buffer';
 import type { Point, User } from './lib/types';
 
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin';
@@ -42,14 +43,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [recordingMessage, setRecordingMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [tracks, setTracks] = useState<[number, number][][]>([]);
+  // 点列は TrackBuffer が持つ（Reactの状態に入れない。仕様9章）。
+  // 記録を始めるたびに作り直して、地図側のレイヤも一緒に張り替える。
+  const [trackBuffer, setTrackBuffer] = useState(() => new TrackBuffer());
   const [distanceTravelled, setDistanceTravelled] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [hasRecorded, setHasRecorded] = useState(false);
   const authRequestVersion = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
-  const lastPointRef = useRef<Point | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
   const routeStartedRef = useRef(false);
   const recordingRef = useRef(false);
@@ -147,6 +149,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN && routeStartedRef.current) {
+      // まとめ送信にしているので、最後の数秒分が残っている
+      if (pendingPointsRef.current.length > 0) {
+        try {
+          sendPoints(socket, pendingPointsRef.current);
+          pendingPointsRef.current = [];
+        } catch (err) {
+          console.error('終了前の位置情報を送信できませんでした:', err);
+        }
+      }
       sendStop(socket);
     }
     if (recordingStartedAtRef.current !== null) {
@@ -157,7 +168,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     routeStartedRef.current = false;
     recordingRef.current = false;
     connectingRef.current = false;
-    lastPointRef.current = null;
     pendingPointsRef.current = [];
     setIsRecording(false);
     setIsConnecting(false);
@@ -171,7 +181,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   useEffect(() => {
     if (currentScreen !== 'solo_record') {
       stopRecordingRef.current();
-      setTracks([]);
+      setTrackBuffer(new TrackBuffer());
     }
   }, [currentScreen]);
 
@@ -187,7 +197,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     stopRecordingRef.current();
   };
 
-  const startLocationWatch = (socket: WebSocket) => {
+  const startLocationWatch = (buffer: TrackBuffer) => {
     if (watchIdRef.current !== null) return;
     watchIdRef.current = navigator.geolocation.watchPosition(
       (location) => {
@@ -200,44 +210,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         setPosition([point[0], point[1]]);
         setHasLocation(true);
 
-        if (!shouldAcceptPoint(point, lastPointRef.current ?? undefined)) {
+        if (!shouldAcceptPoint(point, buffer.lastRecordedPoint ?? undefined)) {
           return;
         }
 
-        const previousPoint = lastPointRef.current;
-        if (
-          currentScreen === 'solo_record' &&
-          previousPoint &&
-          point[2] - previousPoint[2] <= trackGapMilliseconds
-        ) {
-          setDistanceTravelled((currentDistance) => currentDistance + distanceMeters(previousPoint, point));
-        }
-        setTracks((currentTracks) => {
-          const coordinate: [number, number] = [point[0], point[1]];
-          if (!previousPoint || point[2] - previousPoint[2] > trackGapMilliseconds) {
-            return [...currentTracks, [coordinate]];
-          }
-          const nextTracks = [...currentTracks];
-          const lastTrack = nextTracks[nextTracks.length - 1];
-          nextTracks[nextTracks.length - 1] = [...lastTrack, coordinate];
-          return nextTracks;
-        });
-        lastPointRef.current = point;
-
-        try {
-          if (routeStartedRef.current) {
-            sendPoints(socket, [point]);
-          } else {
-            pendingPointsRef.current.push(point);
-            if (pendingPointsRef.current.length >= 500) {
-              throw new Error('サーバーの記録開始応答を待っている間に送信上限へ達しました');
-            }
-          }
-        } catch (err) {
-          console.error('位置情報の送信に失敗しました:', err);
-          setRecordingError('位置情報を送信できませんでした。接続を確認して再度お試しください。');
-          stopRecordingRef.current();
-        }
+        // 点列と累積距離は TrackBuffer が持つ。描画は購読側が
+        // Leaflet のレイヤを直接伸ばすので、ここで状態は更新しない。
+        buffer.add(point);
+        // 送信は flushIntervalMilliseconds ごとにまとめて行う（仕様11章 FLUSH_MS）
+        pendingPointsRef.current.push(point);
       },
       handleGeolocationError,
       { enableHighAccuracy: true, maximumAge: 0, timeout: 20_000 }
@@ -247,15 +228,39 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   useEffect(() => {
     if (!isRecording || currentScreen !== 'solo_record') return;
 
-    const updateElapsedTime = () => {
+    // 表示の更新はここだけ。点が増えるたびには再レンダリングしない（仕様9章）
+    const updateStats = () => {
       if (recordingStartedAtRef.current !== null) {
         setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
       }
+      setDistanceTravelled(trackBuffer.totalMeters);
     };
-    updateElapsedTime();
-    const timerId = window.setInterval(updateElapsedTime, 1000);
-    return () => window.clearInterval(timerId);
-  }, [currentScreen, isRecording]);
+    updateStats();
+    const statsTimerId = window.setInterval(updateStats, 1000);
+
+    // 溜めた点をまとめて送る（仕様11章 FLUSH_MS）
+    const flushPoints = () => {
+      const socket = socketRef.current;
+      if (!socket || !routeStartedRef.current || socket.readyState !== WebSocket.OPEN) return;
+      if (pendingPointsRef.current.length === 0) return;
+      const queuedPoints = pendingPointsRef.current;
+      pendingPointsRef.current = [];
+      try {
+        sendPoints(socket, queuedPoints);
+      } catch (err) {
+        console.error('位置情報の送信に失敗しました:', err);
+        pendingPointsRef.current = queuedPoints.concat(pendingPointsRef.current);
+        setRecordingError('位置情報を送信できませんでした。接続を確認して再度お試しください。');
+        stopRecordingRef.current();
+      }
+    };
+    const flushTimerId = window.setInterval(flushPoints, flushIntervalMilliseconds);
+
+    return () => {
+      window.clearInterval(statsTimerId);
+      window.clearInterval(flushTimerId);
+    };
+  }, [currentScreen, isRecording, trackBuffer]);
 
   const handleStartRecording = () => {
     if (isRecording || isConnecting) {
@@ -277,12 +282,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     setRecordingError('');
     setRecordingMessage('サーバーに接続しています...');
-    setTracks([]);
+    const buffer = new TrackBuffer();
+    setTrackBuffer(buffer);
     setDistanceTravelled(0);
     setElapsedSeconds(0);
     setHasRecorded(false);
     recordingStartedAtRef.current = null;
-    lastPointRef.current = null;
     pendingPointsRef.current = [];
     routeStartedRef.current = false;
     connectingRef.current = true;
@@ -302,7 +307,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     socket.onopen = () => {
       try {
         sendStart(socket);
-        startLocationWatch(socket);
+        startLocationWatch(buffer);
       } catch (err) {
         console.error('記録開始メッセージを送信できませんでした:', err);
         setRecordingError('サーバーに記録開始を送信できませんでした。');
@@ -342,10 +347,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         setHasRecorded(true);
         setRecordingMessage('位置情報を記録してサーバーへ送信中です');
         try {
-          const queuedPoints = pendingPointsRef.current;
-          for (let index = 0; index < queuedPoints.length; index += 100) {
-            sendPoints(socket, queuedPoints.slice(index, index + 100));
-          }
+          sendPoints(socket, pendingPointsRef.current);
           pendingPointsRef.current = [];
         } catch (err) {
           console.error('取得済み位置情報の送信に失敗しました:', err);
@@ -373,7 +375,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
         recordingStartedAtRef.current = null;
       }
-      lastPointRef.current = null;
       pendingPointsRef.current = [];
       setRecordingMessage('');
       setIsRecording(false);
@@ -473,7 +474,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         {(currentScreen === 'before_record' || currentScreen === 'solo_record') && (
           <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
-              <MapView position={position} hasLocation={hasLocation} tracks={tracks} />
+              <MapView position={position} hasLocation={hasLocation} trackBuffer={trackBuffer} trackColor={userColor} />
             </div>
             <div style={{
               position: 'absolute',
