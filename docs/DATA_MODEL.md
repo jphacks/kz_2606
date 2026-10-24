@@ -135,6 +135,11 @@ CREATE TABLE IF NOT EXISTS routes (
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
 
+-- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
+-- 複数人が同時に start を叩いても2本目が作られない。
+CREATE UNIQUE INDEX IF NOT EXISTS routes_one_recording_per_room
+    ON routes (room_id) WHERE ended_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS points (
     id          BIGSERIAL PRIMARY KEY,
     route_id    BIGINT NOT NULL REFERENCES routes (id) ON DELETE CASCADE,
@@ -306,15 +311,17 @@ GET /ws?room=KZ26AB
 
 - `start` を送らずに `points` を送ったら `error / no_active_route`
 - 締められた部屋で `start` / `points` を送ったら `error / room_closed`
+- **すでに誰かが記録中の部屋で `start` を送ったら `error / route_in_use`。**
+  部屋の中で編集できる route は常に1本だけなので、前の人が `stop` するまで待つ
 
 ### Server → Client
 
 | `t` | ペイロード | いつ |
 |---|---|---|
 | `snapshot` | `{room, you, members, routes}` | 接続直後に1回。**現在の絵をまるごと** |
-| `route` | `{route: {id, member, color}}` | 誰かが記録を開始した |
+| `route` | `{route: {id, member, color, startedAt}}` | 誰かが記録を開始した |
 | `points` | `{route, pts}` | 増分。**自分の点は返ってこない** |
-| `route_end` | `{route, member}` | 誰かが記録を終了した |
+| `route_end` | `{route, member, endedAt}` | 誰かが記録を終了した |
 | `member` | `{member}` | 参加 or 名前/色の変更 |
 | `leave` | `{member}` | 全接続が切れた（member単位） |
 | `closed` | `{closedAt, by}` | owner が締めた |
@@ -340,9 +347,14 @@ GET /ws?room=KZ26AB
     { "id": 5, "displayName": "じろう", "color": "#ffe600", "online": false, "banned": true,  "recording": false }
   ],
   "routes": [
-    { "id": 12, "member": 1, "color": "#00e5ff", "endedAt": "2026-10-24T05:10:00Z",
+    { "id": 12, "member": 1, "color": "#00e5ff",
+      "startedAt": "2026-10-24T05:00:00Z", "endedAt": "2026-10-24T05:10:00Z",
+      "meters": 842.5, "elapsedMs": 600000,
       "pts": [[43.0607,141.3544,1761278400000,8.2]] },
-    { "id": 14, "member": 1, "color": "#00e5ff", "endedAt": null, "pts": [] }
+    { "id": 14, "member": 1, "color": "#00e5ff",
+      "startedAt": "2026-10-24T05:30:00Z", "endedAt": null,
+      "meters": 0, "elapsedMs": 1800000,
+      "pts": [] }
   ]
 }
 ```
@@ -350,9 +362,9 @@ GET /ws?room=KZ26AB
 ### その他のメッセージ例
 
 ```json
-{"t":"route",         "route": {"id": 15, "member": 3, "color": "#ff2d78"}}
+{"t":"route",         "route": {"id": 15, "member": 3, "color": "#ff2d78", "startedAt": "2026-10-24T06:00:00Z"}}
 {"t":"points",        "route": 15, "pts": [[43.0611,141.3550,1761278410000,6.1]]}
-{"t":"route_end",     "route": 15, "member": 3}
+{"t":"route_end",     "route": 15, "member": 3, "endedAt": "2026-10-24T06:30:00Z"}
 {"t":"member",        "member": {"id": 3, "displayName": "たろう", "color": "#00e5ff", "online": true, "banned": false, "recording": false}}
 {"t":"leave",         "member": 5}
 {"t":"closed",        "closedAt": "2026-10-24T06:00:00Z", "by": 1}
@@ -374,6 +386,22 @@ GET /ws?room=KZ26AB
   `route_end` = 記録を止めた（まだ部屋にいる） / `leave` = 接続が切れた
 - **未知の `t` は両側で黙って無視する。** これがプロトコル拡張の唯一のルール。
   新しいメッセージ種別は古いクライアントを壊さずに足せる
+- **経過時間と距離は `route` に紐づける。部屋には持たせない。**
+  UIに出すのは「この経路を何分で何km歩いたか」なので、集計の単位も route に揃える。
+  部屋全体の合計が要るときは、クライアントが `routes[]` の分を足す
+  （`members[]` から人数を数えるのと同じ扱い）
+  - `routes[].meters` はその route の累積距離。
+    点の間が `GAP_MS`（30秒）を**超えて**空いた区間は距離に数えない
+    （3章の `> 30秒` と同じ境界。ちょうど30秒は数える）。
+    クライアントの `geo.ts` と同じルールなので、**片方だけ変えると数字がズレる**
+  - `routes[].elapsedMs` は `startedAt` から、記録を止めてあれば `endedAt` まで。
+    **止めたら止まる**
+  - 記録中の route では `elapsedMs` は snapshot を作った瞬間の値なので、
+    **クライアントは `startedAt` を基準に自分で時計を進める**
+  - そのため `route` / `route_end` のメッセージも `startedAt` / `endedAt` を運ぶ。
+    snapshot 以外で知った route でも時計を動かせるようにするため
+  - BAN されたメンバーの route も `routes[]` には入る（色を引けなくなるため）。
+    合計を出すときに含めるかは、`members[].banned` を見てクライアントが決める
 
 ### サーバー側のバリデーション
 
@@ -431,9 +459,24 @@ active ──ban──> banned ──unban──> active
 recording（ended_at IS NULL） ──stop──> ended
 ```
 
+**1つの部屋は route を何本でも持つ。ただし編集できるのは常に1本だけ。**
+
+| | 本数 |
+|---|---|
+| 部屋が持つ route | 何本でも（記録のたびに1本増える） |
+| 記録中（`ended_at IS NULL`）の route | **部屋全体で1本まで** |
+
+- 編集可 = 記録中の route。`points` が追記されるのはこの1本だけ
+- 記録済みの route は**読み取り専用**。消すなら `DELETE .../routes/{routeId}`
+- 誰かが記録中のあいだ、他のメンバーは `start` できない（`error / route_in_use`）。
+  **`members[].recording` が `true` になるのも同時に1人まで**
+- DB側は `routes_one_recording_per_room` の部分ユニーク索引で保証する。
+  同時に `start` が飛んできても2本目は作られない
+
 > **`leave` の時点で開いている route を自動で閉じること。**
 > これを忘れると `ended_at` が永久にNULLの route が溜まり、
 > 「記録中」のインジケータが消えなくなる。一番踏みやすいバグ。
+> **編集可が部屋で1本なので、閉じ忘れると他の誰も記録を始められなくなる。**
 
 ---
 
@@ -553,7 +596,8 @@ Map<routeId, {
 | `MAX_ACCURACY_M` | 30 | `frontend/src/lib/geo.ts` | — |
 | `MIN_DISTANCE_M` | 5 | 同 | **点の総数を直接決める。** 1mにすると5倍 |
 | `MAX_SPEED_MPS` | 14 | 同 | — |
-| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外 |
+| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
+| `GapMillis` | 30,000 | `backend/internal/domain/distance.go` | `snapshot.routes[].meters` の算出。**`GAP_MS` と連動** |
 | `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/hooks/useTracks.ts` | 描画性能 |
 | `FLUSH_MS` | 3,000 | `frontend/src/hooks/useRecorder.ts` | 送信頻度 = `stats` の更新頻度 |
 | `CHUNK` | 500 | `frontend/src/lib/ws.ts` | **`maxMessageSize` 64KB を超えない上限** |

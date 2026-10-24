@@ -50,6 +50,11 @@ CREATE TABLE IF NOT EXISTS routes (
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
 
+-- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
+-- 複数人が同時に start を叩いても2本目が作られない。仕様: DATA_MODEL.md 7章
+CREATE UNIQUE INDEX IF NOT EXISTS routes_one_recording_per_room
+    ON routes (room_id) WHERE ended_at IS NULL;
+
 -- points は route_id だけで辿れる（member_id は routes から引ける）
 CREATE TABLE IF NOT EXISTS points (
     id          BIGSERIAL PRIMARY KEY,
