@@ -1,6 +1,12 @@
 package domain
 
-// Route エンティティ。1メンバーの1回の記録。
-// ended_at が NULL の間が「記録中」。
-//
-// TODO: Route{ID, MemberID, Points, StartedAt, EndedAt}
+import "time"
+
+// Route は1メンバーの1回の記録を表す。EndedAt が nil の間は記録中。
+type Route struct {
+	ID        int64
+	MemberID  int64
+	StartedAt time.Time
+	EndedAt   *time.Time
+	Points    []Point
+}

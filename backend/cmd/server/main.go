@@ -14,6 +14,7 @@ import (
 	"github.com/jphacks/kz_2606/backend/internal/infrastructure/config"
 	"github.com/jphacks/kz_2606/backend/internal/infrastructure/persistence"
 	"github.com/jphacks/kz_2606/backend/internal/interface/rest"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -61,6 +62,7 @@ func run() error {
 			Lifetime: auth.SessionLifetime,
 		},
 	)
+	mux.Handle("/ws", ws.NewHandler(authService, roomService, ws.NewRegistry()))
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
