@@ -3,6 +3,7 @@ import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 
+
 export default function App() {
   // 現在どの画面にいるかを管理 ("home" または "before_record")
   const [currentScreen, setCurrentScreen] = useState<'home' | 'before_record'>('home');
