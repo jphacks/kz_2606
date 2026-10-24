@@ -21,19 +21,19 @@ func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomServic
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", rootHandler)
 	handler := &authHandler{service: authService, cookies: cookies}
-	rooms := &roomHandler{auth: authService, rooms: roomService}
-	admin := &adminHandler{auth: authService, rooms: roomService}
+	rooms := &roomHandler{rooms: roomService}
+	admin := &adminHandler{rooms: roomService}
 	mux.HandleFunc("POST /api/auth/register", handler.register)
 	mux.HandleFunc("POST /api/auth/login", handler.login)
 	mux.HandleFunc("POST /api/auth/logout", handler.logout)
-	mux.HandleFunc("GET /api/auth/me", handler.me)
-	mux.HandleFunc("POST /api/rooms", rooms.create)
+	mux.Handle("GET /api/auth/me", requireUser(authService, http.HandlerFunc(handler.me)))
+	mux.Handle("POST /api/rooms", requireUser(authService, http.HandlerFunc(rooms.create)))
 	mux.HandleFunc("GET /api/rooms/{code}", rooms.get)
-	mux.HandleFunc("POST /api/rooms/{code}/join", rooms.join)
-	mux.HandleFunc("POST /api/rooms/{code}/close", admin.close)
-	mux.HandleFunc("POST /api/rooms/{code}/reopen", admin.reopen)
-	mux.HandleFunc("POST /api/rooms/{code}/members/{memberId}/ban", admin.ban)
-	mux.HandleFunc("DELETE /api/rooms/{code}/members/{memberId}/ban", admin.unban)
-	mux.HandleFunc("DELETE /api/rooms/{code}/routes/{routeId}", admin.deleteRoute)
+	mux.Handle("POST /api/rooms/{code}/join", requireUser(authService, http.HandlerFunc(rooms.join)))
+	mux.Handle("POST /api/rooms/{code}/close", requireUser(authService, http.HandlerFunc(admin.close)))
+	mux.Handle("POST /api/rooms/{code}/reopen", requireUser(authService, http.HandlerFunc(admin.reopen)))
+	mux.Handle("POST /api/rooms/{code}/members/{memberId}/ban", requireUser(authService, http.HandlerFunc(admin.ban)))
+	mux.Handle("DELETE /api/rooms/{code}/members/{memberId}/ban", requireUser(authService, http.HandlerFunc(admin.unban)))
+	mux.Handle("DELETE /api/rooms/{code}/routes/{routeId}", requireUser(authService, http.HandlerFunc(admin.deleteRoute)))
 	return mux
 }
