@@ -1,6 +1,8 @@
 import Home from "./ui/home";
-import Login from "./ui/login";
+import Auth from "./ui/Auth";
 
 export default function App() {
-  return window.location.pathname === "/login" ? <Login /> : <Home />;
+  const path = window.location.pathname;
+
+  return path === "/login" || path === "/signin" ? <Auth /> : <Home />;
 }
