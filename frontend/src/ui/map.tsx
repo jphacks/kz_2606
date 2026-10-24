@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { TrackBuffer } from '../lib/track_buffer';
 
 // 現在地取得時に地図の中心を自動で移動するヘルパー
 const RecenterMap = ({ center }: { center: [number, number] }) => {
@@ -11,12 +13,52 @@ const RecenterMap = ({ center }: { center: [number, number] }) => {
     return null;
 };
 
+// 軌跡のレイヤ。点列は TrackBuffer が持っていて、ここは Leaflet のポリラインを
+// 直接伸ばすだけ。点が増えても React の再レンダリングは起きない。
+// 一括投入は setLatLngs / 増分は addLatLng（仕様: DATA_MODEL.md 9章）
+const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) => {
+    const map = useMap();
+
+    useEffect(() => {
+        const group = L.layerGroup().addTo(map);
+        const polylines: L.Polyline[] = [];
+
+        const appendSegment = (coordinates: [number, number][]) => {
+            const polyline = L.polyline(coordinates, { color, weight: 5 }).addTo(group);
+            polylines.push(polyline);
+            return polyline;
+        };
+
+        // 既にある点列はまとめて入れる
+        for (const segment of buffer.snapshot()) {
+            appendSegment([...segment]);
+        }
+
+        const unsubscribe = buffer.subscribe(({ segmentIndex, coordinate, startedNewSegment }) => {
+            if (startedNewSegment || !polylines[segmentIndex]) {
+                appendSegment([coordinate]);
+                return;
+            }
+            polylines[segmentIndex].addLatLng(coordinate);
+        });
+
+        return () => {
+            unsubscribe();
+            group.remove();
+        };
+    }, [buffer, color, map]);
+
+    return null;
+};
+
 interface MapProps {
     position: [number, number];
     hasLocation: boolean;
+    trackBuffer?: TrackBuffer;
+    trackColor?: string;
 }
 
-export default function Map({ position, hasLocation }: MapProps) {
+export default function Map({ position, hasLocation, trackBuffer, trackColor = '#0E7861' }: MapProps) {
     return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         <MapContainer 
@@ -34,6 +76,7 @@ export default function Map({ position, hasLocation }: MapProps) {
             <Popup>いまここ（あなた）</Popup>
             </Marker>
         )}
+        {trackBuffer && <TrackLayer buffer={trackBuffer} color={trackColor} />}
         <RecenterMap center={position} />
         </MapContainer>
     </div>

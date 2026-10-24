@@ -7,3 +7,19 @@ export interface User {
   id: number;
   username: string;
 }
+
+export interface Room {
+  id: number;
+  code: string;
+  title: string;
+  ownerMemberId: number;
+  isPrivate: boolean;
+  closedAt: string | null;
+}
+
+export interface AuthSession {
+  user: User;
+  room: Room;
+}
+
+export type Point = [lat: number, lng: number, ts: number, acc: number];
