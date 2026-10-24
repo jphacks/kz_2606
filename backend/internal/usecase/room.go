@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
@@ -13,6 +14,11 @@ type RoomRepository interface {
 	Create(ctx context.Context, owner domain.User, code, title string) (domain.Room, domain.Member, error)
 	FindByCode(ctx context.Context, code string) (domain.Room, error)
 	Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error)
+	Close(ctx context.Context, code string, userID int64) (time.Time, error)
+	Reopen(ctx context.Context, code string, userID int64) error
+	Ban(ctx context.Context, code string, userID, memberID int64) error
+	Unban(ctx context.Context, code string, userID, memberID int64) error
+	DeleteRoute(ctx context.Context, code string, userID, routeID int64) error
 }
 
 type RoomService struct {
@@ -64,4 +70,53 @@ func (s *RoomService) Join(ctx context.Context, code string, userID int64, displ
 		return domain.Room{}, domain.Member{}, err
 	}
 	return s.rooms.Join(ctx, normalizedCode, userID, normalizedDisplayName, normalizedColor)
+}
+
+func (s *RoomService) Close(ctx context.Context, code string, userID int64) (time.Time, error) {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return s.rooms.Close(ctx, normalizedCode, userID)
+}
+
+func (s *RoomService) Reopen(ctx context.Context, code string, userID int64) error {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return err
+	}
+	return s.rooms.Reopen(ctx, normalizedCode, userID)
+}
+
+func (s *RoomService) Ban(ctx context.Context, code string, userID, memberID int64) error {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return err
+	}
+	if memberID <= 0 {
+		return domain.ErrMemberNotFound
+	}
+	return s.rooms.Ban(ctx, normalizedCode, userID, memberID)
+}
+
+func (s *RoomService) Unban(ctx context.Context, code string, userID, memberID int64) error {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return err
+	}
+	if memberID <= 0 {
+		return domain.ErrMemberNotFound
+	}
+	return s.rooms.Unban(ctx, normalizedCode, userID, memberID)
+}
+
+func (s *RoomService) DeleteRoute(ctx context.Context, code string, userID, routeID int64) error {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return err
+	}
+	if routeID <= 0 {
+		return domain.ErrRouteNotFound
+	}
+	return s.rooms.DeleteRoute(ctx, normalizedCode, userID, routeID)
 }
