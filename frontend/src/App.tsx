@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import Home  from './ui/home';
+import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 
@@ -58,13 +58,24 @@ export default function App() {
           // ホーム画面
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <Home />
-            {/* テスト用：クリックしたら地図画面に進むボタン */}
-            <div style={{ padding: '20px', textAlign: 'center' }}>
+            {/* 🗺️ マップ画面へ進むボタンを復活 */}
+            <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
               <button 
                 onClick={() => setCurrentScreen('before_record')}
-                style={{ padding: '10px 20px', background: '#0d5c3a', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold' }}
+                style={{ 
+                  width: '100%',
+                  padding: '14px 20px', 
+                  background: '#0E7861', 
+                  color: 'white', 
+                  border: 'none', 
+                  borderRadius: '12px', 
+                  cursor: 'pointer', 
+                  fontWeight: 'bold',
+                  fontSize: '15px',
+                  boxShadow: '0 4px 6px rgba(14, 120, 97, 0.2)'
+                }}
               >
-                🗺️ マップ画面へ進む
+                🗺️ マップ画面へ進む（テスト用）
               </button>
             </div>
           </div>
