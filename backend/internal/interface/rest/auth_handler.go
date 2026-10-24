@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
-	authinfra "github.com/jphacks/kz_2606/backend/internal/infrastructure/auth"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -17,6 +17,7 @@ const sessionCookieName = "session"
 
 type authHandler struct {
 	service *usecase.AuthService
+	cookies CookieOptions
 }
 
 type credentials struct {
@@ -38,7 +39,7 @@ type apiError struct {
 
 func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 	var input credentials
-	if err := decodeJSON(w, r, &input); err != nil || input.Username == "" || input.Password == "" {
+	if err := decodeJSON(w, r, &input); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid_format", "リクエスト形式が正しくありません")
 		return
 	}
@@ -57,7 +58,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	setSessionCookie(w, result.Token)
+	h.setSessionCookie(w, result.Token)
 	writeUser(w, http.StatusOK, result.User)
 }
 
@@ -77,7 +78,7 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		return
 	}
-	setSessionCookie(w, result.Token)
+	h.setSessionCookie(w, result.Token)
 	writeUser(w, http.StatusOK, result.User)
 }
 
@@ -87,7 +88,7 @@ func (h *authHandler) logout(w http.ResponseWriter, _ *http.Request) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   h.cookies.Secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(1, 0),
@@ -115,9 +116,15 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
+	// Content-Type を application/json に限定する。text/plain などを許すと
+	// CORS の単純リクエストになり、プリフライト無しで他サイトから POST できてしまう
+	// （ログインCSRF: 攻撃者のアカウントにログインさせられる）。
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return errors.New("Content-Type must be application/json")
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
 		return err
 	}
@@ -128,15 +135,15 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	return nil
 }
 
-func setSessionCookie(w http.ResponseWriter, token string) {
+func (h *authHandler) setSessionCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   h.cookies.Secure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(authinfra.SessionLifetime.Seconds()),
+		MaxAge:   int(h.cookies.Lifetime.Seconds()),
 	})
 }
 

@@ -63,6 +63,10 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (Aut
 	user, passwordHash, err := s.users.FindByUsername(ctx, normalizedUsername)
 	if err != nil {
 		if errors.Is(err, domain.ErrUserNotFound) {
+			// ユーザーが居なくてもハッシュ比較のコストを払う。
+			// これを省くと「不在=即 401 / パスワード違い=bcrypt 1回分」の
+			// 応答時間差でユーザー名を列挙できてしまう。
+			_ = s.password.Compare(s.password.DummyHash(), password)
 			return AuthResult{}, ErrInvalidCredentials
 		}
 		return AuthResult{}, err

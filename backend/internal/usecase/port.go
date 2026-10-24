@@ -15,6 +15,9 @@ type UserRepository interface {
 type PasswordHasher interface {
 	Hash(password string) (string, error)
 	Compare(passwordHash, password string) error
+	// DummyHash は存在しないユーザー名でも Compare を走らせるためのダミーハッシュ。
+	// 応答時間の差からユーザー名を列挙されるのを防ぐ（DATA_MODEL.md 5章）。
+	DummyHash() string
 }
 
 type SessionCodec interface {

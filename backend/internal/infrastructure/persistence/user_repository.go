@@ -27,7 +27,9 @@ func (r *UserRepository) Create(ctx context.Context, username, passwordHash stri
 	`, username, passwordHash).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "users_username_key" {
+		// 23505 = unique_violation。users に他の UNIQUE 制約は無いので制約名は見ない
+		// （DDL の書き方で自動生成名が変わると 409 が 500 に化けるため）。
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return domain.User{}, domain.ErrUsernameTaken
 		}
 		return domain.User{}, err

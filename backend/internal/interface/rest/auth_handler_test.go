@@ -69,6 +69,8 @@ func (testHasher) Compare(passwordHash, password string) error {
 	return nil
 }
 
+func (testHasher) DummyHash() string { return "hash:" }
+
 type testSessions struct{}
 
 func (testSessions) Encode(userID int64) (string, error) {
@@ -83,15 +85,19 @@ func (testSessions) Decode(token string) (int64, error) {
 	return userID, nil
 }
 
+var testCookies = CookieOptions{Secure: true, Lifetime: 7 * 24 * time.Hour}
+
+func postJSON(target, body string) *http.Request {
+	request := httptest.NewRequest(http.MethodPost, target, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	return request
+}
+
 func TestAuthEndpoints(t *testing.T) {
-	router := NewRouter(newTestAuthService())
+	router := NewRouter(newTestAuthService(), testCookies)
 
 	register := httptest.NewRecorder()
-	router.ServeHTTP(register, httptest.NewRequest(
-		http.MethodPost,
-		"/api/auth/register",
-		strings.NewReader(`{"username":"Taro_1","password":"password123"}`),
-	))
+	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"Taro_1","password":"password123"}`))
 	if register.Code != http.StatusOK {
 		t.Fatalf("register status = %d, body = %s", register.Code, register.Body)
 	}
@@ -128,38 +134,83 @@ func TestAuthEndpoints(t *testing.T) {
 	}
 
 	login := httptest.NewRecorder()
-	router.ServeHTTP(login, httptest.NewRequest(
-		http.MethodPost,
-		"/api/auth/login",
-		strings.NewReader(`{"username":"taro_1","password":"password123"}`),
-	))
+	router.ServeHTTP(login, postJSON("/api/auth/login", `{"username":"taro_1","password":"password123"}`))
 	if login.Code != http.StatusOK {
 		t.Fatalf("login response = %d %s", login.Code, login.Body)
 	}
 }
 
 func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
-	router := NewRouter(newTestAuthService())
+	router := NewRouter(newTestAuthService(), testCookies)
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(
-		http.MethodPost,
-		"/api/auth/login",
-		strings.NewReader(`{"username":"missing","password":"password123"}`),
-	))
+	router.ServeHTTP(response, postJSON("/api/auth/login", `{"username":"missing","password":"password123"}`))
 	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), `"code":"invalid_credentials"`) {
 		t.Fatalf("login response = %d %s", response.Code, response.Body)
 	}
 }
 
 func TestRegisterRejectsInvalidCredentials(t *testing.T) {
-	router := NewRouter(newTestAuthService())
+	router := NewRouter(newTestAuthService(), testCookies)
 	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest(
-		http.MethodPost,
-		"/api/auth/register",
-		strings.NewReader(`{"username":"ab","password":"short"}`),
-	))
+	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"ab","password":"short"}`))
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_username"`) {
 		t.Fatalf("register response = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestRegisterReportsEmptyPasswordAsInvalidPassword(t *testing.T) {
+	router := NewRouter(newTestAuthService(), testCookies)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":""}`))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_password"`) {
+		t.Fatalf("register response = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestRegisterRejectsNonJSONContentType(t *testing.T) {
+	router := NewRouter(newTestAuthService(), testCookies)
+	for _, contentType := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"/api/auth/login",
+			strings.NewReader(`{"username":"taro_1","password":"password123"}`),
+		)
+		if contentType != "" {
+			request.Header.Set("Content-Type", contentType)
+		} else {
+			request.Header.Del("Content-Type")
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("Content-Type %q: status = %d %s", contentType, response.Code, response.Body)
+		}
+		if len(response.Result().Cookies()) != 0 {
+			t.Fatalf("Content-Type %q set a session cookie", contentType)
+		}
+	}
+}
+
+func TestLoginAcceptsUnknownFields(t *testing.T) {
+	router := NewRouter(newTestAuthService(), testCookies)
+	register := httptest.NewRecorder()
+	router.ServeHTTP(register, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
+	if register.Code != http.StatusOK {
+		t.Fatalf("register status = %d %s", register.Code, register.Body)
+	}
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON("/api/auth/login", `{"username":"taro_1","password":"password123","remember":true}`))
+	if response.Code != http.StatusOK {
+		t.Fatalf("login response = %d %s", response.Code, response.Body)
+	}
+}
+
+func TestCookieSecureIsConfigurable(t *testing.T) {
+	router := NewRouter(newTestAuthService(), CookieOptions{Secure: false, Lifetime: time.Hour})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, postJSON("/api/auth/register", `{"username":"taro_1","password":"password123"}`))
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Secure || cookies[0].MaxAge != 3600 {
+		t.Fatalf("session cookie = %+v", cookies)
 	}
 }

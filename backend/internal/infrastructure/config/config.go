@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -15,6 +16,7 @@ type Config struct {
 	DatabaseURL            string
 	SessionSecret          string
 	SessionSecretEphemeral bool
+	CookieSecure           bool
 }
 
 func Load() (Config, error) {
@@ -22,7 +24,7 @@ func Load() (Config, error) {
 		Port:        env("PORT", "8080"),
 		DatabaseURL: strings.TrimSpace(env("DATABASE_URL", defaultDatabaseURL)),
 	}
-	if secret := os.Getenv("SESSION_SECRET"); secret != "" {
+	if secret := strings.TrimSpace(os.Getenv("SESSION_SECRET")); secret != "" {
 		cfg.SessionSecret = secret
 	} else {
 		randomSecret := make([]byte, 32)
@@ -35,6 +37,13 @@ func Load() (Config, error) {
 	if len(cfg.SessionSecret) < 32 {
 		return Config{}, errors.New("SESSION_SECRET must be at least 32 bytes")
 	}
+	// HTTP の開発サーバー（スマホ実機を LAN でつなぐ場合など）では Secure Cookie が
+	// ブラウザに捨てられてログインできないため、明示的に false にできるようにする。
+	cookieSecure, err := envBool("COOKIE_SECURE", true)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.CookieSecure = cookieSecure
 	return cfg, nil
 }
 
@@ -43,4 +52,16 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envBool(key string, fallback bool) (bool, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, errors.New(key + " must be a boolean (true/false)")
+	}
+	return parsed, nil
 }
