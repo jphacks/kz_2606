@@ -3,9 +3,11 @@ package rest
 import (
 	"net/http"
 	"time"
+
+	"github.com/jphacks/kz_2606/backend/internal/interface/session"
 )
 
-const sessionCookieName = "session"
+const sessionCookieName = session.CookieName
 
 func writeSessionCookie(w http.ResponseWriter, token string, options CookieOptions) {
 	http.SetCookie(w, &http.Cookie{

@@ -14,6 +14,7 @@ type RoomRepository interface {
 	Create(ctx context.Context, owner domain.User, code, title string) (domain.Room, domain.Member, error)
 	FindByCode(ctx context.Context, code string) (domain.Room, error)
 	Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error)
+	Snapshot(ctx context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error)
 	Close(ctx context.Context, code string, userID int64) (time.Time, error)
 	Reopen(ctx context.Context, code string, userID int64) error
 	Ban(ctx context.Context, code string, userID, memberID int64) error
@@ -70,6 +71,14 @@ func (s *RoomService) Join(ctx context.Context, code string, userID int64, displ
 		return domain.Room{}, domain.Member{}, err
 	}
 	return s.rooms.Join(ctx, normalizedCode, userID, normalizedDisplayName, normalizedColor)
+}
+
+func (s *RoomService) Snapshot(ctx context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error) {
+	normalizedCode, err := domain.NormalizeRoomCode(code)
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	return s.rooms.Snapshot(ctx, normalizedCode, userID)
 }
 
 func (s *RoomService) Close(ctx context.Context, code string, userID int64) (time.Time, error) {

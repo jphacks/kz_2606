@@ -58,6 +58,122 @@ func (r *RoomRepository) FindByCode(ctx context.Context, code string) (domain.Ro
 	return findRoomByCode(ctx, r.pool, code)
 }
 
+func (r *RoomRepository) Snapshot(ctx context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	room, err := findRoomByCode(ctx, tx, code)
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+
+	you, err := readMember(ctx, tx, room.ID, userID)
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	if you.BannedAt != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrMemberBanned
+	}
+
+	snapshot := domain.RoomSnapshot{Room: room}
+	memberRows, err := tx.Query(ctx, `
+		SELECT id, display_name, color, banned_at
+		FROM members
+		WHERE room_id = $1
+		ORDER BY id
+	`, room.ID)
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	for memberRows.Next() {
+		var member domain.Member
+		var bannedAt pgtype.Timestamptz
+		if err := memberRows.Scan(&member.ID, &member.DisplayName, &member.Color, &bannedAt); err != nil {
+			memberRows.Close()
+			return domain.RoomSnapshot{}, domain.Member{}, err
+		}
+		if bannedAt.Valid {
+			member.BannedAt = timePointer(bannedAt.Time)
+		}
+		snapshot.Members = append(snapshot.Members, member)
+	}
+	if err := memberRows.Err(); err != nil {
+		memberRows.Close()
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	memberRows.Close()
+
+	routeRows, err := tx.Query(ctx, `
+		SELECT routes.id, routes.member_id, routes.started_at, routes.ended_at,
+		       points.latitude, points.longitude,
+		       (EXTRACT(EPOCH FROM points.recorded_at) * 1000)::BIGINT,
+		       COALESCE(points.accuracy, 0)::REAL
+		FROM routes
+		LEFT JOIN points ON points.route_id = routes.id
+		WHERE routes.room_id = $1
+		ORDER BY routes.id, points.recorded_at
+	`, room.ID)
+	if err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	routeIndexes := make(map[int64]int)
+	for routeRows.Next() {
+		var routeID, memberID int64
+		var startedAt time.Time
+		var endedAt pgtype.Timestamptz
+		var latitude, longitude pgtype.Float8
+		var timestamp pgtype.Int8
+		var accuracy pgtype.Float4
+		if err := routeRows.Scan(
+			&routeID, &memberID, &startedAt, &endedAt,
+			&latitude, &longitude, &timestamp, &accuracy,
+		); err != nil {
+			routeRows.Close()
+			return domain.RoomSnapshot{}, domain.Member{}, err
+		}
+		index, exists := routeIndexes[routeID]
+		if !exists {
+			route := domain.Route{
+				ID:        routeID,
+				MemberID:  memberID,
+				StartedAt: startedAt,
+				Points:    make([]domain.Point, 0),
+			}
+			if endedAt.Valid {
+				route.EndedAt = timePointer(endedAt.Time)
+			}
+			snapshot.Routes = append(snapshot.Routes, route)
+			index = len(snapshot.Routes) - 1
+			routeIndexes[routeID] = index
+		}
+		if latitude.Valid {
+			snapshot.Routes[index].Points = append(snapshot.Routes[index].Points, domain.Point{
+				Lat: latitude.Float64,
+				Lng: longitude.Float64,
+				TS:  timestamp.Int64,
+				Acc: accuracy.Float32,
+			})
+		}
+	}
+	if err := routeRows.Err(); err != nil {
+		routeRows.Close()
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	routeRows.Close()
+	if err := tx.Commit(ctx); err != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, err
+	}
+	return snapshot, you, nil
+}
+
 func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -89,6 +205,26 @@ func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, di
 		return domain.Room{}, domain.Member{}, err
 	}
 	return room, member, nil
+}
+
+func readMember(ctx context.Context, tx pgx.Tx, roomID, userID int64) (domain.Member, error) {
+	var member domain.Member
+	var bannedAt pgtype.Timestamptz
+	err := tx.QueryRow(ctx, `
+		SELECT id, display_name, color, banned_at
+		FROM members
+		WHERE room_id = $1 AND user_id = $2
+	`, roomID, userID).Scan(&member.ID, &member.DisplayName, &member.Color, &bannedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Member{}, domain.ErrMemberNotFound
+	}
+	if err != nil {
+		return domain.Member{}, err
+	}
+	if bannedAt.Valid {
+		member.BannedAt = timePointer(bannedAt.Time)
+	}
+	return member, nil
 }
 
 func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, error) {

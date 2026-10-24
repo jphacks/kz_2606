@@ -143,6 +143,36 @@ func (r *testRoomRepository) FindByCode(_ context.Context, code string) (domain.
 	return room, nil
 }
 
+func (r *testRoomRepository) Snapshot(_ context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error) {
+	room, exists := r.rooms[code]
+	if !exists {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrRoomNotFound
+	}
+	you, exists := r.members[code][userID]
+	if !exists {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrMemberNotFound
+	}
+	if you.BannedAt != nil {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrMemberBanned
+	}
+	snapshot := domain.RoomSnapshot{
+		Room:    room,
+		Members: make([]domain.Member, 0, len(r.members[code])),
+		Routes:  make([]domain.Route, 0, len(r.routes[code])),
+	}
+	for _, member := range r.members[code] {
+		snapshot.Members = append(snapshot.Members, member)
+	}
+	for id, memberID := range r.routes[code] {
+		snapshot.Routes = append(snapshot.Routes, domain.Route{
+			ID:       id,
+			MemberID: memberID,
+			Points:   make([]domain.Point, 0),
+		})
+	}
+	return snapshot, you, nil
+}
+
 func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
 	room, exists := r.rooms[code]
 	if !exists {

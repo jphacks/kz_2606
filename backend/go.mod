@@ -3,6 +3,7 @@ module github.com/jphacks/kz_2606/backend
 go 1.26.0
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.11.0
 	golang.org/x/crypto v0.58.0
 )

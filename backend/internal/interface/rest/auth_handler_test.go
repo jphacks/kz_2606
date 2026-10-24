@@ -156,6 +156,39 @@ func TestAuthEndpoints(t *testing.T) {
 	}
 }
 
+func TestAllProtectedRoutesRequireAuth(t *testing.T) {
+	router, _ := newRoomTestRouter()
+	cases := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/auth/me"},
+		{http.MethodPost, "/api/rooms"},
+		{http.MethodPost, "/api/rooms/KZ26AB/join"},
+		{http.MethodPost, "/api/rooms/KZ26AB/close"},
+		{http.MethodPost, "/api/rooms/KZ26AB/reopen"},
+		{http.MethodPost, "/api/rooms/KZ26AB/members/1/ban"},
+		{http.MethodDelete, "/api/rooms/KZ26AB/members/1/ban"},
+		{http.MethodDelete, "/api/rooms/KZ26AB/routes/1"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.method+" "+testCase.path, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, nil))
+			if response.Code != http.StatusUnauthorized {
+				t.Errorf("%s %s = %d %s; want 401",
+					testCase.method, testCase.path, response.Code, response.Body)
+			}
+		})
+	}
+
+	public := httptest.NewRecorder()
+	router.ServeHTTP(public, httptest.NewRequest(http.MethodGet, "/api/rooms/KZ26AB", nil))
+	if public.Code == http.StatusUnauthorized {
+		t.Errorf("GET /api/rooms/{code} = 401; route should be public")
+	}
+}
+
 func TestLoginDoesNotRevealUnknownUsername(t *testing.T) {
 	router := NewRouter(newTestAuthService(), nil, testCookies)
 	response := httptest.NewRecorder()

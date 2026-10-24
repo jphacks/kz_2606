@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/session"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -14,12 +15,7 @@ type userContextKey struct{}
 
 func requireUser(authService *usecase.AuthService, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(sessionCookieName)
-		if err != nil {
-			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")
-			return
-		}
-		user, err := authService.Me(r.Context(), cookie.Value)
+		user, err := session.AuthenticateRequest(r.Context(), r, authService)
 		if err != nil {
 			if errors.Is(err, usecase.ErrUnauthorized) {
 				writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")

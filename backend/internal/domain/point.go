@@ -1,7 +1,10 @@
 package domain
 
-// Point 値オブジェクト。緯度・経度・取得時刻・測位精度。
-// JSONのワイヤ形式はここに置かない（interface/ws/dto.go の責務）。
-// 仕様: DATA_MODEL.md 3章
-//
-// TODO: Point{Lat, Lng, TS, Acc} / Distance / PathLength
+// Point は緯度・経度・取得時刻（unix milliseconds）・測位精度を表す。
+// JSONのワイヤ形式は interface/ws/dto.go で変換する。
+type Point struct {
+	Lat float64
+	Lng float64
+	TS  int64
+	Acc float32
+}
