@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -11,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
@@ -127,7 +130,13 @@ func (r *testRoomRepository) Create(_ context.Context, owner domain.User, code, 
 	}
 	r.nextRoomID++
 	r.nextMemID++
-	room := domain.Room{ID: r.nextRoomID, Code: code, Title: title, OwnerMemberID: r.nextMemID}
+	room := domain.Room{
+		ID:            r.nextRoomID,
+		Code:          code,
+		Title:         title,
+		OwnerUserID:   owner.ID,
+		OwnerMemberID: r.nextMemID,
+	}
 	member := domain.Member{ID: r.nextMemID, DisplayName: owner.Username, Color: domain.FirstMemberColor}
 	r.rooms[code] = room
 	r.members[code] = map[int64]domain.Member{owner.ID: member}
@@ -147,6 +156,9 @@ func (r *testRoomRepository) Snapshot(_ context.Context, code string, userID int
 	room, exists := r.rooms[code]
 	if !exists {
 		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrRoomNotFound
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrPrivateRoom
 	}
 	you, exists := r.members[code][userID]
 	if !exists {
@@ -173,31 +185,35 @@ func (r *testRoomRepository) Snapshot(_ context.Context, code string, userID int
 	return snapshot, you, nil
 }
 
-func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
+func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error) {
 	room, exists := r.rooms[code]
 	if !exists {
-		return domain.Room{}, domain.Member{}, domain.ErrRoomNotFound
+		return domain.Room{}, domain.Member{}, false, domain.ErrRoomNotFound
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.Room{}, domain.Member{}, false, domain.ErrPrivateRoom
 	}
 	if member, exists := r.members[code][userID]; exists {
 		if member.BannedAt != nil {
-			return domain.Room{}, domain.Member{}, domain.ErrMemberBanned
+			return domain.Room{}, domain.Member{}, false, domain.ErrMemberBanned
 		}
-		return room, member, nil
+		return room, member, false, nil
 	}
 	r.nextMemID++
 	member := domain.Member{ID: r.nextMemID, DisplayName: displayName, Color: color}
 	r.members[code][userID] = member
-	return room, member, nil
+	return room, member, true, nil
 }
 
-func (r *testRoomRepository) Close(_ context.Context, code string, userID int64) (time.Time, error) {
+func (r *testRoomRepository) Close(_ context.Context, code string, userID int64) (time.Time, int64, bool, error) {
 	room, ok := r.rooms[code]
 	if !ok {
-		return time.Time{}, domain.ErrRoomNotFound
+		return time.Time{}, 0, false, domain.ErrRoomNotFound
 	}
 	if userID != r.ownerUserIDs[code] {
-		return time.Time{}, domain.ErrForbidden
+		return time.Time{}, 0, false, domain.ErrForbidden
 	}
+	changed := room.ClosedAt == nil
 	if room.ClosedAt == nil {
 		now := time.Now()
 		room.ClosedAt = &now
@@ -206,20 +222,21 @@ func (r *testRoomRepository) Close(_ context.Context, code string, userID int64)
 	for routeID := range r.activeRoutes[code] {
 		r.activeRoutes[code][routeID] = false
 	}
-	return *room.ClosedAt, nil
+	return *room.ClosedAt, room.OwnerMemberID, changed, nil
 }
 
-func (r *testRoomRepository) Reopen(_ context.Context, code string, userID int64) error {
+func (r *testRoomRepository) Reopen(_ context.Context, code string, userID int64) (int64, bool, error) {
 	room, ok := r.rooms[code]
 	if !ok {
-		return domain.ErrRoomNotFound
+		return 0, false, domain.ErrRoomNotFound
 	}
 	if userID != r.ownerUserIDs[code] {
-		return domain.ErrForbidden
+		return 0, false, domain.ErrForbidden
 	}
+	changed := room.ClosedAt != nil
 	room.ClosedAt = nil
 	r.rooms[code] = room
-	return nil
+	return room.OwnerMemberID, changed, nil
 }
 
 func (r *testRoomRepository) Ban(_ context.Context, code string, userID, memberID int64) error {
@@ -275,12 +292,19 @@ func (r *testRoomRepository) DeleteRoute(_ context.Context, code string, userID,
 }
 
 func newRoomTestRouter() (*http.ServeMux, *testRoomRepository) {
+	router, repository, _ := newRoomTestRouterWithRegistry()
+	return router, repository
+}
+
+func newRoomTestRouterWithRegistry() (*http.ServeMux, *testRoomRepository, *ws.Registry) {
 	repository := newTestRoomRepository()
+	registry := ws.NewRegistry()
 	return NewRouter(
 		newTestAuthService(),
 		usecase.NewRoomService(repository),
 		testCookies,
-	), repository
+		registry,
+	), repository, registry
 }
 
 func registerTestUser(t *testing.T, router *http.ServeMux, username string) *http.Cookie {
@@ -338,6 +362,48 @@ func TestCreateRoomPersistsRoomAndOwnerMember(t *testing.T) {
 		!strings.Contains(get.Body.String(), `"title":"公園を歩こう"`) ||
 		!strings.Contains(get.Body.String(), `"ownerMemberId":`) {
 		t.Fatalf("get room response = %d %s", get.Code, get.Body)
+	}
+}
+
+func TestPrivateRoomRejectsOtherMembers(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "owner_1")
+	owner := domain.User{ID: 1, Username: "owner_1"}
+	room, _, err := repository.Create(context.Background(), owner, "PRAV23", "owner_1のルーム")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room.IsPrivate = true
+	repository.rooms[room.Code] = room
+
+	otherCookie := registerTestUser(t, router, "other_1")
+	response := requestWithCookie(
+		router,
+		postJSON("/api/rooms/"+room.Code+"/join", `{"displayName":"other","color":"#abcdef"}`),
+		otherCookie,
+	)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), `"code":"private_room"`) {
+		t.Fatalf("private room join = %d %s; want private_room 403", response.Code, response.Body)
+	}
+	if len(repository.members[room.Code]) != 1 {
+		t.Fatalf("private room member count = %d; want owner only", len(repository.members[room.Code]))
+	}
+}
+
+func TestGetPrivateRoomHidesItsExistence(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	registerTestUser(t, router, "owner_1")
+	room, _, err := repository.Create(context.Background(), domain.User{ID: 1, Username: "owner_1"}, "PRAV23", "owner_1のルーム")
+	if err != nil {
+		t.Fatal(err)
+	}
+	room.IsPrivate = true
+	repository.rooms[room.Code] = room
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/rooms/"+room.Code, nil))
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"room_not_found"`) {
+		t.Fatalf("get private room = %d %s; want room_not_found 404", response.Code, response.Body)
 	}
 }
 
@@ -411,6 +477,149 @@ func TestGetUnknownRoomReturnsNotFound(t *testing.T) {
 	}
 }
 
+func TestDeleteRouteBroadcastsWithNormalizedRoomCode(t *testing.T) {
+	repository := newTestRoomRepository()
+	authService := newTestAuthService()
+	roomService := usecase.NewRoomService(repository)
+	registry := ws.NewRegistry()
+	router := NewRouter(authService, roomService, testCookies, registry)
+	router.Handle("/ws", ws.NewHandler(authService, roomService, registry))
+
+	ownerCookie := registerTestUser(t, router, "owner_1")
+	created := requestWithCookie(router, postJSON("/api/rooms", `{"title":"park"}`), ownerCookie)
+	var result struct {
+		Room roomResponse `json:"room"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	repository.routes[result.Room.Code] = map[int64]int64{15: repository.ownerUserIDs[result.Room.Code]}
+	repository.activeRoutes[result.Room.Code] = map[int64]bool{15: false}
+
+	server := httptest.NewServer(router)
+	defer server.Close()
+	lowercaseCode := strings.ToLower(result.Room.Code)
+	connection, response, err := websocket.DefaultDialer.Dial(
+		strings.Replace(server.URL, "http://", "ws://", 1)+"/ws?room="+lowercaseCode,
+		http.Header{"Cookie": []string{ownerCookie.Name + "=" + ownerCookie.Value}},
+	)
+	if err != nil {
+		t.Fatalf("websocket dial failed: response=%v err=%v", response, err)
+	}
+	defer connection.Close()
+	var snapshot map[string]any
+	if err := connection.ReadJSON(&snapshot); err != nil || snapshot["t"] != "snapshot" {
+		t.Fatalf("initial websocket message = %+v, err=%v", snapshot, err)
+	}
+
+	request, err := http.NewRequest(
+		http.MethodDelete,
+		server.URL+"/api/rooms/"+lowercaseCode+"/routes/15",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.AddCookie(ownerCookie)
+	deleteResponse, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deleteResponse.Body.Close()
+	if deleteResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete route status = %d", deleteResponse.StatusCode)
+	}
+
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var event struct {
+		Type  string `json:"t"`
+		Route int64  `json:"route"`
+	}
+	if err := connection.ReadJSON(&event); err != nil {
+		t.Fatalf("read route deletion event: %v", err)
+	}
+	if event.Type != "route_deleted" || event.Route != 15 {
+		t.Fatalf("route deletion event = %+v", event)
+	}
+
+	callAdmin := func(method, operation string) {
+		t.Helper()
+		adminRequest, err := http.NewRequest(
+			method,
+			server.URL+"/api/rooms/"+lowercaseCode+"/"+operation,
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		adminRequest.AddCookie(ownerCookie)
+		adminResponse, err := http.DefaultClient.Do(adminRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer adminResponse.Body.Close()
+		if adminResponse.StatusCode != http.StatusOK {
+			t.Fatalf("%s %s status = %d", method, operation, adminResponse.StatusCode)
+		}
+	}
+	readEvent := func(connection *websocket.Conn) string {
+		t.Helper()
+		if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		var nextEvent struct {
+			Type string `json:"t"`
+		}
+		if err := connection.ReadJSON(&nextEvent); err != nil {
+			t.Fatal(err)
+		}
+		return nextEvent.Type
+	}
+	assertNoEvent := func(connection *websocket.Conn) {
+		t.Helper()
+		if err := connection.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		var nextEvent map[string]any
+		err := connection.ReadJSON(&nextEvent)
+		if err == nil {
+			t.Fatalf("unexpected duplicate event: %+v", nextEvent)
+		}
+		var networkError net.Error
+		if !errors.As(err, &networkError) || !networkError.Timeout() {
+			t.Fatalf("waiting for no event returned %v, want timeout", err)
+		}
+	}
+
+	callAdmin(http.MethodPost, "close")
+	if eventType := readEvent(connection); eventType != "closed" {
+		t.Fatalf("close event type = %q", eventType)
+	}
+	callAdmin(http.MethodPost, "close")
+	assertNoEvent(connection)
+
+	reopenedConnection, response, err := websocket.DefaultDialer.Dial(
+		strings.Replace(server.URL, "http://", "ws://", 1)+"/ws?room="+lowercaseCode,
+		http.Header{"Cookie": []string{ownerCookie.Name + "=" + ownerCookie.Value}},
+	)
+	if err != nil {
+		t.Fatalf("reopen websocket dial failed: response=%v err=%v", response, err)
+	}
+	defer reopenedConnection.Close()
+	var reopenedSnapshot map[string]any
+	if err := reopenedConnection.ReadJSON(&reopenedSnapshot); err != nil || reopenedSnapshot["t"] != "snapshot" {
+		t.Fatalf("reopen websocket snapshot = %+v, err=%v", reopenedSnapshot, err)
+	}
+	callAdmin(http.MethodPost, "reopen")
+	if eventType := readEvent(reopenedConnection); eventType != "reopened" {
+		t.Fatalf("reopen event type = %q", eventType)
+	}
+	callAdmin(http.MethodPost, "reopen")
+	assertNoEvent(reopenedConnection)
+}
+
 func TestJoinRoomPersistsMemberAndIsIdempotent(t *testing.T) {
 	router, repository := newRoomTestRouter()
 	ownerCookie := registerTestUser(t, router, "owner_1")
@@ -443,6 +652,9 @@ func TestJoinRoomPersistsMemberAndIsIdempotent(t *testing.T) {
 	second := requestWithCookie(router, postJSON(path, `{"displayName":"別の名前","color":"#ffffff"}`), joinerCookie)
 	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"displayName":"歩く人"`) {
 		t.Fatalf("idempotent join response = %d %s", second.Code, second.Body)
+	}
+	if repository.nextMemID != 2 {
+		t.Fatalf("idempotent join created another member; next member ID = %d", repository.nextMemID)
 	}
 	if count := len(repository.members[created.Room.Code]); count != 2 {
 		t.Fatalf("member count = %d, want owner and one joiner", count)

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
@@ -18,23 +19,102 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
-func (r *UserRepository) Create(ctx context.Context, username, passwordHash string) (domain.User, error) {
+func (r *UserRepository) CreateWithPersonalRoom(
+	ctx context.Context,
+	username, passwordHash, roomCode, roomTitle string,
+) (domain.User, domain.Room, domain.Member, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
 	var user domain.User
-	err := r.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash)
 		VALUES ($1, $2)
 		RETURNING id, username, created_at
 	`, username, passwordHash).Scan(&user.ID, &user.Username, &user.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		// 23505 = unique_violation。users に他の UNIQUE 制約は無いので制約名は見ない
-		// （DDL の書き方で自動生成名が変わると 409 が 500 に化けるため）。
+		// users currently has only one UNIQUE constraint: username.
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return domain.User{}, domain.ErrUsernameTaken
+			return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrUsernameTaken
 		}
-		return domain.User{}, err
+		return domain.User{}, domain.Room{}, domain.Member{}, err
 	}
-	return user, nil
+
+	var room domain.Room
+	err = tx.QueryRow(ctx, `
+		INSERT INTO rooms (code, title, owner_user_id, is_private)
+		VALUES ($1, $2, $3, TRUE)
+		RETURNING id, code, title, is_private
+	`, roomCode, roomTitle, user.ID).Scan(&room.ID, &room.Code, &room.Title, &room.IsPrivate)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// rooms currently has only one UNIQUE constraint: code.
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+		}
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerUserID = user.ID
+
+	member, err := insertMember(ctx, tx, room.ID, user.ID, user.Username, domain.FirstMemberColor)
+	if err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerMemberID = member.ID
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, domain.Room{}, domain.Member{}, err
+	}
+	return user, room, member, nil
+}
+
+// CreatePersonalRoom は既にいるユーザーに個人ルームを作る。
+// 個人ルームが導入される前に登録されたアカウントを後から揃えるために使う。
+func (r *UserRepository) CreatePersonalRoom(
+	ctx context.Context,
+	owner domain.User,
+	roomCode, roomTitle string,
+) (domain.Room, domain.Member, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(context.Background())
+	}()
+
+	var room domain.Room
+	err = tx.QueryRow(ctx, `
+		INSERT INTO rooms (code, title, owner_user_id, is_private)
+		VALUES ($1, $2, $3, TRUE)
+		RETURNING id, code, title, is_private
+	`, roomCode, roomTitle, owner.ID).Scan(&room.ID, &room.Code, &room.Title, &room.IsPrivate)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// 23505 は code の重複（別コードで張り直す）か、
+		// rooms_one_private_room_per_owner の重複（他の接続が先に作った）のどちらか。
+		// 呼び出し側が FindPersonalRoom で引き直して判別する。
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.Room{}, domain.Member{}, domain.ErrRoomCodeTaken
+		}
+		return domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerUserID = owner.ID
+
+	member, err := insertMember(ctx, tx, room.ID, owner.ID, owner.Username, domain.FirstMemberColor)
+	if err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	room.OwnerMemberID = member.ID
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Room{}, domain.Member{}, err
+	}
+	return room, member, nil
 }
 
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (domain.User, string, error) {
@@ -68,4 +148,31 @@ func (r *UserRepository) FindByID(ctx context.Context, id int64) (domain.User, e
 		return domain.User{}, err
 	}
 	return user, nil
+}
+
+func (r *UserRepository) FindPersonalRoom(ctx context.Context, ownerUserID int64) (domain.Room, error) {
+	var room domain.Room
+	var closedAt pgtype.Timestamptz
+	err := r.pool.QueryRow(ctx, `
+		SELECT rooms.id, rooms.code, rooms.title, rooms.owner_user_id,
+		       members.id, rooms.is_private, rooms.closed_at
+		FROM rooms
+		JOIN members ON members.room_id = rooms.id AND members.user_id = rooms.owner_user_id
+		WHERE rooms.owner_user_id = $1 AND rooms.is_private = TRUE
+		ORDER BY rooms.id
+		LIMIT 1
+	`, ownerUserID).Scan(
+		&room.ID, &room.Code, &room.Title, &room.OwnerUserID,
+		&room.OwnerMemberID, &room.IsPrivate, &closedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Room{}, domain.ErrRoomNotFound
+	}
+	if err != nil {
+		return domain.Room{}, err
+	}
+	if closedAt.Valid {
+		room.ClosedAt = &closedAt.Time
+	}
+	return room, nil
 }

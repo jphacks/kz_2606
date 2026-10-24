@@ -48,6 +48,7 @@ func (r *RoomRepository) Create(ctx context.Context, owner domain.User, code, ti
 		return domain.Room{}, domain.Member{}, err
 	}
 	room.OwnerMemberID = ownerMember.ID
+	room.OwnerUserID = owner.ID
 	if err := tx.Commit(ctx); err != nil {
 		return domain.Room{}, domain.Member{}, err
 	}
@@ -75,6 +76,9 @@ func (r *RoomRepository) Snapshot(ctx context.Context, code string, userID int64
 		return domain.RoomSnapshot{}, domain.Member{}, err
 	}
 
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.RoomSnapshot{}, domain.Member{}, domain.ErrPrivateRoom
+	}
 	you, err := readMember(ctx, tx, room.ID, userID)
 	if err != nil {
 		return domain.RoomSnapshot{}, domain.Member{}, err
@@ -174,10 +178,10 @@ func (r *RoomRepository) Snapshot(ctx context.Context, code string, userID int64
 	return snapshot, you, nil
 }
 
-func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
+func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -185,26 +189,31 @@ func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, di
 
 	room, err := findRoomByCode(ctx, tx, code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
+	}
+	if room.IsPrivate && room.OwnerUserID != userID {
+		return domain.Room{}, domain.Member{}, false, domain.ErrPrivateRoom
 	}
 
+	joined := true
 	member, err := insertMember(ctx, tx, room.ID, userID, displayName, color)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		joined = false
 		member, err = findMember(ctx, tx, room.ID, userID)
 		if err != nil {
-			return domain.Room{}, domain.Member{}, err
+			return domain.Room{}, domain.Member{}, false, err
 		}
 	}
 	if member.BannedAt != nil {
-		return domain.Room{}, domain.Member{}, domain.ErrMemberBanned
+		return domain.Room{}, domain.Member{}, false, domain.ErrMemberBanned
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
-	return room, member, nil
+	return room, member, joined, nil
 }
 
 func readMember(ctx context.Context, tx pgx.Tx, roomID, userID int64) (domain.Member, error) {
@@ -227,10 +236,10 @@ func readMember(ctx context.Context, tx pgx.Tx, roomID, userID int64) (domain.Me
 	return member, nil
 }
 
-func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, error) {
+func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (time.Time, int64, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -238,10 +247,22 @@ func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (
 
 	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if ownerUserID != userID {
-		return time.Time{}, domain.ErrForbidden
+		return time.Time{}, 0, false, domain.ErrForbidden
+	}
+	var ownerMemberID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM members WHERE room_id = $1 AND user_id = $2
+	`, roomID, ownerUserID).Scan(&ownerMemberID); err != nil {
+		return time.Time{}, 0, false, err
+	}
+	var wasClosed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT closed_at IS NOT NULL FROM rooms WHERE id = $1
+	`, roomID).Scan(&wasClosed); err != nil {
+		return time.Time{}, 0, false, err
 	}
 	var closedAt time.Time
 	err = tx.QueryRow(ctx, `
@@ -251,25 +272,25 @@ func (r *RoomRepository) Close(ctx context.Context, code string, userID int64) (
 		RETURNING closed_at
 	`, roomID).Scan(&closedAt)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE routes
 		SET ended_at = $2
 		WHERE room_id = $1 AND ended_at IS NULL
 	`, roomID, closedAt); err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return time.Time{}, err
+		return time.Time{}, 0, false, err
 	}
-	return closedAt, nil
+	return closedAt, ownerMemberID, !wasClosed, nil
 }
 
-func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) error {
+func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) (int64, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -277,15 +298,29 @@ func (r *RoomRepository) Reopen(ctx context.Context, code string, userID int64) 
 
 	roomID, ownerUserID, err := lockRoomOwner(ctx, tx, code)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if ownerUserID != userID {
-		return domain.ErrForbidden
+		return 0, false, domain.ErrForbidden
 	}
-	if _, err := tx.Exec(ctx, `UPDATE rooms SET closed_at = NULL WHERE id = $1`, roomID); err != nil {
-		return err
+	var ownerMemberID int64
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM members WHERE room_id = $1 AND user_id = $2
+	`, roomID, ownerUserID).Scan(&ownerMemberID); err != nil {
+		return 0, false, err
 	}
-	return tx.Commit(ctx)
+	result, err := tx.Exec(ctx, `
+		UPDATE rooms SET closed_at = NULL
+		WHERE id = $1 AND closed_at IS NOT NULL
+	`, roomID)
+	if err != nil {
+		return 0, false, err
+	}
+	changed := result.RowsAffected() > 0
+	if err := tx.Commit(ctx); err != nil {
+		return 0, false, err
+	}
+	return ownerMemberID, changed, nil
 }
 
 func (r *RoomRepository) Ban(ctx context.Context, code string, userID, memberID int64) error {
@@ -403,11 +438,11 @@ func findRoomByCode(ctx context.Context, q queryRower, code string) (domain.Room
 	var room domain.Room
 	var closedAt pgtype.Timestamptz
 	err := q.QueryRow(ctx, `
-		SELECT rooms.id, rooms.code, rooms.title, members.id, rooms.closed_at
+		SELECT rooms.id, rooms.code, rooms.title, rooms.owner_user_id, members.id, rooms.is_private, rooms.closed_at
 		FROM rooms
 		JOIN members ON members.room_id = rooms.id AND members.user_id = rooms.owner_user_id
 		WHERE rooms.code = $1
-	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerMemberID, &closedAt)
+	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerUserID, &room.OwnerMemberID, &room.IsPrivate, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Room{}, domain.ErrRoomNotFound
 	}

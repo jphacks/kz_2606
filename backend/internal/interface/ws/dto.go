@@ -15,6 +15,7 @@ type roomDTO struct {
 	Code          string     `json:"code"`
 	Title         string     `json:"title"`
 	OwnerMemberID int64      `json:"ownerMemberId"`
+	IsPrivate     bool       `json:"isPrivate"`
 	ClosedAt      *time.Time `json:"closedAt"`
 }
 
@@ -48,6 +49,11 @@ type snapshotDTO struct {
 	You     youDTO      `json:"you"`
 	Members []memberDTO `json:"members"`
 	Routes  []routeDTO  `json:"routes"`
+}
+
+type memberEventDTO struct {
+	Type   string    `json:"t"`
+	Member memberDTO `json:"member"`
 }
 
 func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry) snapshotDTO {
@@ -98,6 +104,7 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			Code:          snapshot.Room.Code,
 			Title:         snapshot.Room.Title,
 			OwnerMemberID: snapshot.Room.OwnerMemberID,
+			IsPrivate:     snapshot.Room.IsPrivate,
 			ClosedAt:      snapshot.Room.ClosedAt,
 		},
 		You: youDTO{
@@ -108,5 +115,16 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 		},
 		Members: members,
 		Routes:  routes,
+	}
+}
+
+func makeMemberDTO(member domain.Member, online, recording bool) memberDTO {
+	return memberDTO{
+		ID:          member.ID,
+		DisplayName: member.DisplayName,
+		Color:       member.Color,
+		Online:      online,
+		Banned:      member.BannedAt != nil,
+		Recording:   recording,
 	}
 }

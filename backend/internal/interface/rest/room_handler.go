@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
+	"github.com/jphacks/kz_2606/backend/internal/interface/ws"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
 
 type roomHandler struct {
-	rooms *usecase.RoomService
+	rooms    *usecase.RoomService
+	registry *ws.Registry
 }
 
 type createRoomRequest struct {
@@ -29,6 +31,7 @@ type roomResponse struct {
 	Code          string     `json:"code"`
 	Title         string     `json:"title"`
 	OwnerMemberID int64      `json:"ownerMemberId"`
+	IsPrivate     bool       `json:"isPrivate"`
 	ClosedAt      *time.Time `json:"closedAt"`
 }
 
@@ -74,6 +77,10 @@ func (h *roomHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		return
 	}
+	if room.IsPrivate {
+		writeAPIError(w, http.StatusNotFound, "room_not_found", "部屋が見つかりません")
+		return
+	}
 	writeJSON(w, http.StatusOK, struct {
 		Room roomResponse `json:"room"`
 	}{Room: toRoomResponse(room)})
@@ -89,7 +96,7 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_format", "リクエスト形式が正しくありません")
 		return
 	}
-	room, member, err := h.rooms.Join(r.Context(), r.PathValue("code"), user.ID, input.DisplayName, input.Color)
+	room, member, joined, err := h.rooms.Join(r.Context(), r.PathValue("code"), user.ID, input.DisplayName, input.Color)
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrInvalidDisplayName):
@@ -98,6 +105,8 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusBadRequest, "invalid_color", "色は #rrggbb 形式で入力してください")
 		case errors.Is(err, domain.ErrMemberBanned):
 			writeAPIError(w, http.StatusForbidden, "banned", "この部屋への参加は禁止されています")
+		case errors.Is(err, domain.ErrPrivateRoom):
+			writeAPIError(w, http.StatusForbidden, "private_room", "この部屋には参加できません")
 		case errors.Is(err, domain.ErrRoomNotFound), errors.Is(err, domain.ErrInvalidRoomCode):
 			writeAPIError(w, http.StatusNotFound, "room_not_found", "部屋が見つかりません")
 		default:
@@ -105,6 +114,9 @@ func (h *roomHandler) join(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		}
 		return
+	}
+	if joined {
+		h.registry.BroadcastMember(room.Code, member, false, 0)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Member memberResponse `json:"member"`
@@ -121,6 +133,7 @@ func toRoomResponse(room domain.Room) roomResponse {
 		Code:          room.Code,
 		Title:         room.Title,
 		OwnerMemberID: room.OwnerMemberID,
+		IsPrivate:     room.IsPrivate,
 		ClosedAt:      room.ClosedAt,
 	}
 }

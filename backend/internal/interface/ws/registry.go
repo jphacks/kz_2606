@@ -1,6 +1,13 @@
 package ws
 
-import "sync"
+import (
+	"encoding/json"
+	"log/slog"
+	"sync"
+	"time"
+
+	"github.com/jphacks/kz_2606/backend/internal/domain"
+)
 
 // Registry は部屋ごとの接続を管理し、同じメンバーの複数タブを保持する。
 type Registry struct {
@@ -66,6 +73,86 @@ func (r *Registry) Broadcast(roomCode string, excludeMemberID int64, message []b
 			connection.enqueue(message)
 		}
 	}
+}
+
+func (r *Registry) BroadcastMember(roomCode string, member domain.Member, recording bool, excludeMemberID int64) {
+	r.broadcastEvent(roomCode, excludeMemberID, memberEventDTO{
+		Type: "member",
+		Member: makeMemberDTO(
+			member,
+			r.IsOnline(roomCode, member.ID),
+			recording,
+		),
+	})
+}
+
+func (r *Registry) BroadcastLeave(roomCode string, memberID int64) {
+	r.broadcastEvent(roomCode, memberID, struct {
+		Type   string `json:"t"`
+		Member int64  `json:"member"`
+	}{Type: "leave", Member: memberID})
+}
+
+func (r *Registry) BroadcastClosed(roomCode string, closedAt time.Time, by int64) {
+	r.broadcastEvent(roomCode, 0, struct {
+		Type     string    `json:"t"`
+		ClosedAt time.Time `json:"closedAt"`
+		By       int64     `json:"by"`
+	}{Type: "closed", ClosedAt: closedAt, By: by})
+}
+
+func (r *Registry) BroadcastReopened(roomCode string, by int64) {
+	r.broadcastEvent(roomCode, 0, struct {
+		Type string `json:"t"`
+		By   int64  `json:"by"`
+	}{Type: "reopened", By: by})
+}
+
+func (r *Registry) BroadcastBanned(roomCode string, memberID, by int64) {
+	r.broadcastEvent(roomCode, memberID, struct {
+		Type   string `json:"t"`
+		Member int64  `json:"member"`
+		By     int64  `json:"by"`
+	}{Type: "banned", Member: memberID, By: by})
+
+	errorPayload, err := json.Marshal(struct {
+		Type    string `json:"t"`
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}{Type: "error", Code: "banned", Message: "この部屋への参加は禁止されています"})
+	if err != nil {
+		slog.Error("encode websocket ban error failed", "err", err)
+		return
+	}
+	for _, connection := range r.connections(roomCode) {
+		if connection.memberID == memberID {
+			connection.disconnectAfter(errorPayload)
+		}
+	}
+}
+
+func (r *Registry) BroadcastUnbanned(roomCode string, memberID, by int64) {
+	r.broadcastEvent(roomCode, 0, struct {
+		Type   string `json:"t"`
+		Member int64  `json:"member"`
+		By     int64  `json:"by"`
+	}{Type: "unbanned", Member: memberID, By: by})
+}
+
+func (r *Registry) BroadcastRouteDeleted(roomCode string, routeID int64) {
+	r.broadcastEvent(roomCode, 0, struct {
+		Type  string `json:"t"`
+		Route int64  `json:"route"`
+	}{Type: "route_deleted", Route: routeID})
+}
+
+func (r *Registry) broadcastEvent(roomCode string, excludeMemberID int64, event any) {
+	message, err := json.Marshal(event)
+	if err != nil {
+		slog.Error("encode websocket event failed", "room", roomCode, "err", err)
+		return
+	}
+	r.Broadcast(roomCode, excludeMemberID, message)
 }
 
 func (r *Registry) connections(roomCode string) []*client {

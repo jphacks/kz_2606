@@ -57,7 +57,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	snapshot, you, err := h.rooms.Snapshot(r.Context(), roomCode, user.ID)
 	if err != nil {
 		switch {
-		case errors.Is(err, domain.ErrMemberNotFound), errors.Is(err, domain.ErrMemberBanned):
+		case errors.Is(err, domain.ErrMemberNotFound), errors.Is(err, domain.ErrMemberBanned), errors.Is(err, domain.ErrPrivateRoom):
 			http.Error(w, "この部屋に接続する権限がありません", http.StatusForbidden)
 		case errors.Is(err, domain.ErrInvalidRoomCode), errors.Is(err, domain.ErrRoomNotFound):
 			http.Error(w, "部屋が見つかりません", http.StatusNotFound)
@@ -74,12 +74,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	connection := &client{
-		conn:     conn,
-		out:      make(chan []byte, sendBufferSize),
-		done:     make(chan struct{}),
-		registry: h.registry,
-		roomCode: snapshot.Room.Code,
-		memberID: you.ID,
+		conn:       conn,
+		out:        make(chan []byte, sendBufferSize),
+		done:       make(chan struct{}),
+		closeAfter: make(chan struct{}),
+		registry:   h.registry,
+		roomCode:   snapshot.Room.Code,
+		memberID:   you.ID,
 	}
 	h.registry.Add(connection)
 	payload, err := json.Marshal(makeSnapshotDTO(snapshot, you, h.registry))
@@ -89,5 +90,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go connection.writePump(payload)
+	recording := false
+	for _, route := range snapshot.Routes {
+		if route.MemberID == you.ID && route.EndedAt == nil {
+			recording = true
+			break
+		}
+	}
+	h.registry.BroadcastMember(snapshot.Room.Code, you, recording, you.ID)
 	connection.readPump()
 }

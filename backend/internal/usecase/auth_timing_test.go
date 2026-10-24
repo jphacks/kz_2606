@@ -25,8 +25,8 @@ func (h *recordingHasher) DummyHash() string { return "hash:" }
 
 type emptyUsers struct{}
 
-func (emptyUsers) Create(context.Context, string, string) (domain.User, error) {
-	return domain.User{}, domain.ErrUsernameTaken
+func (emptyUsers) CreateWithPersonalRoom(context.Context, string, string, string, string) (domain.User, domain.Room, domain.Member, error) {
+	return domain.User{}, domain.Room{}, domain.Member{}, domain.ErrUsernameTaken
 }
 
 func (emptyUsers) FindByUsername(context.Context, string) (domain.User, string, error) {
@@ -35,6 +35,15 @@ func (emptyUsers) FindByUsername(context.Context, string) (domain.User, string, 
 
 func (emptyUsers) FindByID(context.Context, int64) (domain.User, error) {
 	return domain.User{}, domain.ErrUserNotFound
+}
+
+func (emptyUsers) FindPersonalRoom(context.Context, int64) (domain.Room, error) {
+	return domain.Room{}, domain.ErrRoomNotFound
+}
+
+func (emptyUsers) CreatePersonalRoom(_ context.Context, owner domain.User, roomCode, roomTitle string) (domain.Room, domain.Member, error) {
+	return domain.Room{ID: owner.ID, Code: roomCode, Title: roomTitle, OwnerUserID: owner.ID, IsPrivate: true},
+		domain.Member{ID: owner.ID, DisplayName: owner.Username, Color: domain.FirstMemberColor}, nil
 }
 
 type stubSessions struct{}

@@ -56,7 +56,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSessionCookie(w, result.Token, h.cookies)
-	writeUser(w, http.StatusOK, result.User)
+	writeAuthResponse(w, http.StatusOK, result.User, result.Room)
 }
 
 func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +76,7 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeSessionCookie(w, result.Token, h.cookies)
-	writeUser(w, http.StatusOK, result.User)
+	writeAuthResponse(w, http.StatusOK, result.User, result.Room)
 }
 
 func (h *authHandler) logout(w http.ResponseWriter, _ *http.Request) {
@@ -89,7 +89,13 @@ func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeUser(w, http.StatusOK, user)
+	room, err := h.service.PersonalRoom(r.Context(), user)
+	if err != nil {
+		slog.Error("get personal room failed", "err", err, "user_id", user.ID)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
+		return
+	}
+	writeAuthResponse(w, http.StatusOK, user, room)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
@@ -112,12 +118,16 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 	return nil
 }
 
-func writeUser(w http.ResponseWriter, status int, user domain.User) {
+func writeAuthResponse(w http.ResponseWriter, status int, user domain.User, room domain.Room) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(struct {
-		User apiUser `json:"user"`
-	}{User: apiUser{ID: user.ID, Username: user.Username}}); err != nil {
+		User apiUser      `json:"user"`
+		Room roomResponse `json:"room"`
+	}{
+		User: apiUser{ID: user.ID, Username: user.Username},
+		Room: toRoomResponse(room),
+	}); err != nil {
 		slog.Error("write auth response failed", "err", err)
 	}
 }
