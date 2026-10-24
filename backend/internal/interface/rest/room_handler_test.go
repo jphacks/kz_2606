@@ -182,24 +182,24 @@ func (r *testRoomRepository) Snapshot(_ context.Context, code string, userID int
 	return snapshot, you, nil
 }
 
-func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
+func (r *testRoomRepository) Join(_ context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error) {
 	room, exists := r.rooms[code]
 	if !exists {
-		return domain.Room{}, domain.Member{}, domain.ErrRoomNotFound
+		return domain.Room{}, domain.Member{}, false, domain.ErrRoomNotFound
 	}
 	if room.IsPrivate && room.OwnerUserID != userID {
-		return domain.Room{}, domain.Member{}, domain.ErrPrivateRoom
+		return domain.Room{}, domain.Member{}, false, domain.ErrPrivateRoom
 	}
 	if member, exists := r.members[code][userID]; exists {
 		if member.BannedAt != nil {
-			return domain.Room{}, domain.Member{}, domain.ErrMemberBanned
+			return domain.Room{}, domain.Member{}, false, domain.ErrMemberBanned
 		}
-		return room, member, nil
+		return room, member, false, nil
 	}
 	r.nextMemID++
 	member := domain.Member{ID: r.nextMemID, DisplayName: displayName, Color: color}
 	r.members[code][userID] = member
-	return room, member, nil
+	return room, member, true, nil
 }
 
 func (r *testRoomRepository) Close(_ context.Context, code string, userID int64) (time.Time, error) {
@@ -497,6 +497,9 @@ func TestJoinRoomPersistsMemberAndIsIdempotent(t *testing.T) {
 	second := requestWithCookie(router, postJSON(path, `{"displayName":"別の名前","color":"#ffffff"}`), joinerCookie)
 	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"displayName":"歩く人"`) {
 		t.Fatalf("idempotent join response = %d %s", second.Code, second.Body)
+	}
+	if repository.nextMemID != 2 {
+		t.Fatalf("idempotent join created another member; next member ID = %d", repository.nextMemID)
 	}
 	if count := len(repository.members[created.Room.Code]); count != 2 {
 		t.Fatalf("member count = %d, want owner and one joiner", count)

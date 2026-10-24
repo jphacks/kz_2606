@@ -13,7 +13,7 @@ const maxRoomCodeAttempts = 5
 type RoomRepository interface {
 	Create(ctx context.Context, owner domain.User, code, title string) (domain.Room, domain.Member, error)
 	FindByCode(ctx context.Context, code string) (domain.Room, error)
-	Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error)
+	Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error)
 	Snapshot(ctx context.Context, code string, userID int64) (domain.RoomSnapshot, domain.Member, error)
 	Close(ctx context.Context, code string, userID int64) (time.Time, error)
 	Reopen(ctx context.Context, code string, userID int64) error
@@ -57,18 +57,18 @@ func (s *RoomService) FindByCode(ctx context.Context, code string) (domain.Room,
 	return s.rooms.FindByCode(ctx, normalizedCode)
 }
 
-func (s *RoomService) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
+func (s *RoomService) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error) {
 	normalizedCode, err := domain.NormalizeRoomCode(code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	normalizedDisplayName, err := domain.NormalizeDisplayName(displayName)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	normalizedColor, err := domain.NormalizeColor(color)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	return s.rooms.Join(ctx, normalizedCode, userID, normalizedDisplayName, normalizedColor)
 }

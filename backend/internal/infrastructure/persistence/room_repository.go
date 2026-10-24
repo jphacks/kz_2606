@@ -178,10 +178,10 @@ func (r *RoomRepository) Snapshot(ctx context.Context, code string, userID int64
 	return snapshot, you, nil
 }
 
-func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, error) {
+func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, displayName, color string) (domain.Room, domain.Member, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	defer func() {
 		_ = tx.Rollback(context.Background())
@@ -189,29 +189,31 @@ func (r *RoomRepository) Join(ctx context.Context, code string, userID int64, di
 
 	room, err := findRoomByCode(ctx, tx, code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	if room.IsPrivate && room.OwnerUserID != userID {
-		return domain.Room{}, domain.Member{}, domain.ErrPrivateRoom
+		return domain.Room{}, domain.Member{}, false, domain.ErrPrivateRoom
 	}
 
+	joined := true
 	member, err := insertMember(ctx, tx, room.ID, userID, displayName, color)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		joined = false
 		member, err = findMember(ctx, tx, room.ID, userID)
 		if err != nil {
-			return domain.Room{}, domain.Member{}, err
+			return domain.Room{}, domain.Member{}, false, err
 		}
 	}
 	if member.BannedAt != nil {
-		return domain.Room{}, domain.Member{}, domain.ErrMemberBanned
+		return domain.Room{}, domain.Member{}, false, domain.ErrMemberBanned
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Room{}, domain.Member{}, err
+		return domain.Room{}, domain.Member{}, false, err
 	}
-	return room, member, nil
+	return room, member, joined, nil
 }
 
 func readMember(ctx context.Context, tx pgx.Tx, roomID, userID int64) (domain.Member, error) {
