@@ -1,8 +1,9 @@
-export default function App() {
-  // TODO: ?room=CODE があれば RoomView、無ければ JoinScreen
+import Home from './ui/home';
+
+function App() {
   return (
-    <div className="flex h-full items-center justify-center text-neutral-500">
-      GPS Art
-    </div>
+    <Home />
   );
 }
+
+export default App;
