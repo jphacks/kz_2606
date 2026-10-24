@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // 現在地取得時に地図の中心を自動で移動するヘルパー
@@ -14,9 +14,10 @@ const RecenterMap = ({ center }: { center: [number, number] }) => {
 interface MapProps {
     position: [number, number];
     hasLocation: boolean;
+    tracks?: [number, number][][];
 }
 
-export default function Map({ position, hasLocation }: MapProps) {
+export default function Map({ position, hasLocation, tracks = [] }: MapProps) {
     return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         <MapContainer 
@@ -34,6 +35,13 @@ export default function Map({ position, hasLocation }: MapProps) {
             <Popup>いまここ（あなた）</Popup>
             </Marker>
         )}
+        {tracks.map((track, index) => (
+            <Polyline
+                key={index}
+                positions={track}
+                pathOptions={{ color: '#0E7861', weight: 5 }}
+            />
+        ))}
         <RecenterMap center={position} />
         </MapContainer>
     </div>
