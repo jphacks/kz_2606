@@ -36,11 +36,14 @@ type memberDTO struct {
 }
 
 type routeDTO struct {
-	ID       int64        `json:"id"`
-	MemberID int64        `json:"member"`
-	Color    string       `json:"color"`
-	EndedAt  *time.Time   `json:"endedAt"`
-	Points   []pointTuple `json:"pts"`
+	ID        int64        `json:"id"`
+	MemberID  int64        `json:"member"`
+	Color     string       `json:"color"`
+	StartedAt time.Time    `json:"startedAt"`
+	EndedAt   *time.Time   `json:"endedAt"`
+	Meters    float64      `json:"meters"`
+	ElapsedMs int64        `json:"elapsedMs"`
+	Points    []pointTuple `json:"pts"`
 }
 
 type snapshotDTO struct {
@@ -56,14 +59,14 @@ type memberEventDTO struct {
 	Member memberDTO `json:"member"`
 }
 
-func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry) snapshotDTO {
+func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *Registry, now time.Time) snapshotDTO {
 	memberByID := make(map[int64]domain.Member, len(snapshot.Members))
 	recordingByMember := make(map[int64]bool)
 	for _, member := range snapshot.Members {
 		memberByID[member.ID] = member
 	}
 	for _, route := range snapshot.Routes {
-		if route.EndedAt == nil {
+		if route.Recording() {
 			recordingByMember[route.MemberID] = true
 		}
 	}
@@ -87,12 +90,16 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 		for _, point := range route.Points {
 			points = append(points, pointTuple{point.Lat, point.Lng, point.TS, point.Acc})
 		}
+		stats := route.Stats(now)
 		routes = append(routes, routeDTO{
-			ID:       route.ID,
-			MemberID: route.MemberID,
-			Color:    memberByID[route.MemberID].Color,
-			EndedAt:  route.EndedAt,
-			Points:   points,
+			ID:        route.ID,
+			MemberID:  route.MemberID,
+			Color:     memberByID[route.MemberID].Color,
+			StartedAt: route.StartedAt,
+			EndedAt:   route.EndedAt,
+			Meters:    stats.Meters,
+			ElapsedMs: stats.Elapsed.Milliseconds(),
+			Points:    points,
 		})
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })

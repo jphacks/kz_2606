@@ -6,10 +6,11 @@ import { buildInviteUrl, createRoom } from '../lib/api';
 interface HomeProps {
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
+  onStartSolo?: () => void;
   username?: string;
 }
 
-export default function Home({ onNavigateToLogin, onNavigateToRegister, username }: HomeProps) {
+export default function Home({ onNavigateToLogin, onNavigateToRegister, onStartSolo, username }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [teamName, setTeamName] = useState('');
   const [roomCode, setRoomCode] = useState<string | null>(null);
@@ -139,7 +140,10 @@ export default function Home({ onNavigateToLogin, onNavigateToRegister, username
 
           <div className="grid grid-cols-2 gap-4">
             {/* 一人ではじめる ボタン */}
-            <button className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition cursor-pointer">
+            <button
+              onClick={onStartSolo}
+              className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition cursor-pointer"
+            >
               <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
                 <Footprints size={24} />
               </div>

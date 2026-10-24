@@ -16,3 +16,10 @@ export interface Room {
   isPrivate: boolean;
   closedAt: string | null;
 }
+
+export interface AuthSession {
+  user: User;
+  room: Room;
+}
+
+export type Point = [lat: number, lng: number, ts: number, acc: number];
