@@ -4,9 +4,10 @@ import { Waypoints, Footprints, Flag, Link as LinkIcon, Plus, X, History, LogIn,
 interface HomeProps {
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
+  username?: string;
 }
 
-export default function Home({ onNavigateToLogin, onNavigateToRegister }: HomeProps) {
+export default function Home({ onNavigateToLogin, onNavigateToRegister, username }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
@@ -21,28 +22,32 @@ export default function Home({ onNavigateToLogin, onNavigateToRegister }: HomePr
           <span className="text-xl font-bold tracking-wider text-gray-900">まちえ</span>
         </div>
 
-        {/* 右側のエリア：テスト用ボタン ＆ 使い方 */}
+        {/* 右側のエリア：認証状態 ＆ 使い方 */}
         <div className="flex items-center gap-3">
-          {/* テスト用：ログイン画面へ */}
-          {onNavigateToLogin && (
-            <button
-              onClick={onNavigateToLogin}
-              className="bg-[#0E7861]/1:// hover:bg-[#0E7861]/20 text-[#0E7861] border border-[#0E7861]/30 text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-            >
-              <LogIn size={14} />
-              <span>ログイン</span>
-            </button>
-          )}
+          {username ? (
+            <span className="text-xs font-bold text-[#0E7861]">{username}</span>
+          ) : (
+            <>
+              {onNavigateToLogin && (
+                <button
+                  onClick={onNavigateToLogin}
+                  className="bg-[#0E7861]/10 hover:bg-[#0E7861]/20 text-[#0E7861] border border-[#0E7861]/30 text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                >
+                  <LogIn size={14} />
+                  <span>ログイン</span>
+                </button>
+              )}
 
-          {/* テスト用：新規登録画面へ */}
-          {onNavigateToRegister && (
-            <button
-              onClick={onNavigateToRegister}
-              className="bg-[#0E7861] text-white text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
-            >
-              <UserPlus size={14} />
-              <span>登録</span>
-            </button>
+              {onNavigateToRegister && (
+                <button
+                  onClick={onNavigateToRegister}
+                  className="bg-[#0E7861] text-white text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 shadow-sm transition cursor-pointer"
+                >
+                  <UserPlus size={14} />
+                  <span>登録</span>
+                </button>
+              )}
+            </>
           )}
 
           <button className="text-sm text-[#0E7861] font-medium ml-1">使い方</button>

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Footprints, ArrowRight } from 'lucide-react';
+import { getApiErrorMessage, parseAuthUser } from '../lib/api';
+import type { User } from '../lib/types';
 
 interface LoginProps {
   onNavigateToRegister?: () => void;
   onStartWithoutAuth?: () => void;
-  onLoginSuccess?: (data: any) => void; // ログイン成功時に親コンポーネントへ通知する用（必要に応じて）
+  onLoginSuccess?: (user: User) => void;
 }
 
 export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLoginSuccess }: LoginProps) {
@@ -32,21 +34,21 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
         }),
       });
 
-      const data = await response.json();
+      const data: unknown = await response.json();
 
       if (!response.ok) {
         // サーバーからエラーが返ってきた場合
-        setErrorMessage(data.error?.message || 'ログインに失敗しました');
+        setErrorMessage(getApiErrorMessage(data, 'ログインに失敗しました'));
         return;
       }
 
-      // ログイン成功！
-      console.log('ログイン成功:', data);
-      alert('ログインしました！');
-      
-      if (onLoginSuccess) {
-        onLoginSuccess(data);
+      const user = parseAuthUser(data);
+      if (!user) {
+        setErrorMessage('サーバーから不正な認証情報が返されました');
+        return;
       }
+
+      onLoginSuccess?.(user);
 
     } catch (err) {
       console.error('通信エラー:', err);

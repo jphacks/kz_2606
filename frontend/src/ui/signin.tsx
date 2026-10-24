@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Mail, ArrowRight } from 'lucide-react';
+import { getApiErrorMessage, parseAuthUser } from '../lib/api';
+import type { User } from '../lib/types';
 
 interface RegisterProps {
   onNavigateToLogin?: () => void;
   onStartWithoutAuth?: () => void;
-  onRegisterSuccess?: (data: any) => void; // 登録成功時に親へ通知する用（必要に応じて）
+  onRegisterSuccess?: (user: User) => void;
 }
 
 export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegisterSuccess }: RegisterProps) {
@@ -32,22 +34,22 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegi
         }),
       });
 
-      const data = await response.json();
+      const data: unknown = await response.json();
 
       if (!response.ok) {
         // サーバーからエラーが返ってきた場合
-        setErrorMessage(data.error?.message || '新規登録に失敗しました');
+        setErrorMessage(getApiErrorMessage(data, '新規登録に失敗しました'));
         return;
       }
 
-      // 新規登録成功！
-      console.log('登録成功:', data);
-      alert('ユーザー登録が完了しました！');
-      
-      if (onRegisterSuccess) {
-        onRegisterSuccess(data);
-      } else if (onNavigateToLogin) {
-        // 成功したら自動でログイン画面に切り替えるなどの動線も作れます
+      const user = parseAuthUser(data);
+      if (!user) {
+        setErrorMessage('サーバーから不正な認証情報が返されました');
+        return;
+      }
+
+      onRegisterSuccess?.(user);
+      if (!onRegisterSuccess && onNavigateToLogin) {
         onNavigateToLogin();
       }
 
