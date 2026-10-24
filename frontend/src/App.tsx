@@ -1,16 +1,6 @@
-import Home from './ui/home';
-import login from "./ui/login";
+import Home from "./ui/home";
+import Login from "./ui/login";
 
-export default function App() {{
-  return (
-    <Home />
-  );
+export default function App() {
+  return window.location.pathname === "/login" ? <Login /> : <Home />;
 }
-
-function App() {
-  return (
-    <Home />
-  );
-}
-
-export default App;
