@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -12,10 +12,9 @@ body,
 }
 
 body {
-  background: #0b0f14;
-  color: #e6edf3;
+  background: #f7f9f8;
+  color: #1f2937;
   font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", sans-serif;
-  /* スマホで地図を触ったときにページ全体が引っぱられないように */
   overscroll-behavior: none;
   -webkit-user-select: none;
   user-select: none;
@@ -26,15 +25,14 @@ body {
 }
 
 .leaflet-container {
-  background: #0b0f14;
+  background: #f7f9f8;
   font-family: inherit;
 }
 
-/* 暗い地図に合わせる */
 .leaflet-control-attribution {
-  background: rgba(11, 15, 20, 0.7) !important;
-  color: #7d8590 !important;
+  background: rgba(255, 255, 255, 0.8) !important;
+  color: #4b5563 !important;
 }
 .leaflet-control-attribution a {
-  color: #9aa7b2 !important;
+  color: #007a5e !important;
 }
