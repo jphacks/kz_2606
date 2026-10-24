@@ -1,5 +1,6 @@
 package rest
 
-// ServeMux の組み立て。CORS もここ。
+// ServeMux の組み立て。CORS とセッションミドルウェアもここ。
+// 仕様: DATA_MODEL.md 5章
 //
-// TODO: NewRouter(roomSvc, sessionSvc, wsHandler, staticFS)
+// TODO: NewRouter(authSvc, roomSvc, sessionSvc, wsHandler, staticFS)
