@@ -12,12 +12,11 @@ import (
 )
 
 type adminHandler struct {
-	auth  *usecase.AuthService
 	rooms *usecase.RoomService
 }
 
 func (h *adminHandler) close(w http.ResponseWriter, r *http.Request) {
-	user, ok := authenticatedUser(w, r, h.auth)
+	user, ok := userFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -32,7 +31,7 @@ func (h *adminHandler) close(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *adminHandler) reopen(w http.ResponseWriter, r *http.Request) {
-	user, ok := authenticatedUser(w, r, h.auth)
+	user, ok := userFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -52,7 +51,7 @@ func (h *adminHandler) unban(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *adminHandler) setBan(w http.ResponseWriter, r *http.Request, banned bool) {
-	user, ok := authenticatedUser(w, r, h.auth)
+	user, ok := userFromRequest(w, r)
 	if !ok {
 		return
 	}
@@ -74,7 +73,7 @@ func (h *adminHandler) setBan(w http.ResponseWriter, r *http.Request, banned boo
 }
 
 func (h *adminHandler) deleteRoute(w http.ResponseWriter, r *http.Request) {
-	user, ok := authenticatedUser(w, r, h.auth)
+	user, ok := userFromRequest(w, r)
 	if !ok {
 		return
 	}

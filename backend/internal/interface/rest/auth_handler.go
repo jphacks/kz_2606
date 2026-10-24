@@ -7,13 +7,10 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 	"github.com/jphacks/kz_2606/backend/internal/usecase"
 )
-
-const sessionCookieName = "session"
 
 type authHandler struct {
 	service *usecase.AuthService
@@ -58,7 +55,7 @@ func (h *authHandler) register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	h.setSessionCookie(w, result.Token)
+	writeSessionCookie(w, result.Token, h.cookies)
 	writeUser(w, http.StatusOK, result.User)
 }
 
@@ -78,38 +75,18 @@ func (h *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
 		return
 	}
-	h.setSessionCookie(w, result.Token)
+	writeSessionCookie(w, result.Token, h.cookies)
 	writeUser(w, http.StatusOK, result.User)
 }
 
 func (h *authHandler) logout(w http.ResponseWriter, _ *http.Request) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.cookies.Secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(1, 0),
-	})
+	clearSessionCookie(w, h.cookies)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *authHandler) me(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")
-		return
-	}
-	user, err := h.service.Me(r.Context(), cookie.Value)
-	if err != nil {
-		if errors.Is(err, usecase.ErrUnauthorized) {
-			writeAPIError(w, http.StatusUnauthorized, "unauthorized", "ログインが必要です")
-			return
-		}
-		slog.Error("load current user failed", "err", err)
-		writeAPIError(w, http.StatusInternalServerError, "internal_error", "サーバーエラーが発生しました")
+	user, ok := userFromRequest(w, r)
+	if !ok {
 		return
 	}
 	writeUser(w, http.StatusOK, user)
@@ -133,18 +110,6 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, destination any) error {
 		return errors.New("request must contain exactly one JSON value")
 	}
 	return nil
-}
-
-func (h *authHandler) setSessionCookie(w http.ResponseWriter, token string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookieName,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   h.cookies.Secure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(h.cookies.Lifetime.Seconds()),
-	})
 }
 
 func writeUser(w http.ResponseWriter, status int, user domain.User) {

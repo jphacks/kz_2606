@@ -111,7 +111,13 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Fatalf("registered user = %+v", registered.User)
 	}
 	cookies := register.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].Name != sessionCookieName || !cookies[0].HttpOnly || !cookies[0].Secure {
+	if len(cookies) != 1 ||
+		cookies[0].Name != sessionCookieName ||
+		cookies[0].Path != "/" ||
+		!cookies[0].HttpOnly ||
+		!cookies[0].Secure ||
+		cookies[0].SameSite != http.SameSiteLaxMode ||
+		cookies[0].MaxAge != int(testCookies.Lifetime.Seconds()) {
 		t.Fatalf("registration session cookie = %+v", cookies)
 	}
 
@@ -129,7 +135,14 @@ func TestAuthEndpoints(t *testing.T) {
 		t.Fatalf("logout status = %d", logout.Code)
 	}
 	expiredCookie := logout.Result().Cookies()
-	if len(expiredCookie) != 1 || expiredCookie[0].MaxAge >= 0 {
+	if len(expiredCookie) != 1 ||
+		expiredCookie[0].Name != sessionCookieName ||
+		expiredCookie[0].Value != "" ||
+		expiredCookie[0].Path != "/" ||
+		!expiredCookie[0].HttpOnly ||
+		!expiredCookie[0].Secure ||
+		expiredCookie[0].SameSite != http.SameSiteLaxMode ||
+		expiredCookie[0].MaxAge >= 0 {
 		t.Fatalf("logout cookie was not expired: %+v", expiredCookie)
 	}
 
@@ -137,6 +150,9 @@ func TestAuthEndpoints(t *testing.T) {
 	router.ServeHTTP(login, postJSON("/api/auth/login", `{"username":"taro_1","password":"password123"}`))
 	if login.Code != http.StatusOK {
 		t.Fatalf("login response = %d %s", login.Code, login.Body)
+	}
+	if loginCookies := login.Result().Cookies(); len(loginCookies) != 1 || loginCookies[0].Name != sessionCookieName {
+		t.Fatalf("login session cookie = %+v", loginCookies)
 	}
 }
 
