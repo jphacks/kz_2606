@@ -127,6 +127,10 @@ export class TrackBuffer {
     return this.lastPoint;
   }
 
+  get lastCoordinate(): Coordinate | null {
+    return this.lastPoint ? [this.lastPoint[0], this.lastPoint[1]] : null;
+  }
+
   /** 既にある点列。描画側の初回投入に使う */
   snapshot(): readonly Coordinate[][] {
     return this.segments;
