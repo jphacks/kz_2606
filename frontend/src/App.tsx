@@ -9,7 +9,7 @@ import { buildInviteUrl, getCurrentSession } from './lib/api';
 import { shouldAcceptPoint } from './lib/geo';
 import { connectToRoom, flushIntervalMilliseconds, parseRoomMember, parseRoomSnapshot, sendPoints, sendStart, sendStop } from './lib/ws';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, RoomSnapshot, User } from './lib/types';
+import type { Point, Room, RoomSnapshot, User } from './lib/types';
 
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
 
@@ -40,6 +40,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [roomTitle, setRoomTitle] = useState<string | null>(null);
+  const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   const [roomDataError, setRoomDataError] = useState('');
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -102,9 +103,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   }, []);
 
   useEffect(() => {
-    const isTeamScreen = currentScreen === 'before_record' ||
-      (currentScreen === 'setting' && window.location.pathname !== '/solo');
-    if (!sessionLoaded || !roomCode || !isTeamScreen) {
+    const activeRoomCode = currentScreen === 'solo_record' ||
+      (currentScreen === 'setting' && window.location.pathname === '/solo')
+      ? roomCode
+      : teamRoom?.code ?? null;
+    const isRoomScreen = currentScreen === 'before_record' || currentScreen === 'solo_record' ||
+      (currentScreen === 'setting' && window.location.pathname !== '/result');
+    if (!sessionLoaded || !activeRoomCode || !isRoomScreen) {
       setRoomSnapshot(null);
       setRoomDataError('');
       return;
@@ -115,7 +120,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     setRoomDataError('');
     let socket: WebSocket;
     try {
-      socket = connectToRoom(roomCode);
+      socket = connectToRoom(activeRoomCode);
     } catch (error) {
       console.error('チーム情報の接続を開始できませんでした:', error);
       setRoomDataError('チーム情報を取得できませんでした。接続を確認してください。');
@@ -141,7 +146,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setRoomDataError('サーバーから不正なチーム情報が返されました。');
           return;
         }
-        if (snapshot.room.code.toUpperCase() !== roomCode.toUpperCase()) {
+        if (snapshot.room.code.toUpperCase() !== activeRoomCode.toUpperCase()) {
           console.error('別のルームの情報を受信しました:', snapshot.room.code);
           setRoomDataError('別のチーム情報を受信しました。再読み込みしてください。');
           return;
@@ -204,7 +209,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       isActive = false;
       socket.close();
     };
-  }, [currentScreen, roomCode, sessionLoaded]);
+  }, [currentScreen, roomCode, sessionLoaded, teamRoom?.code]);
 
   useEffect(() => {
     const handlePopState = () => setCurrentScreen(getScreenFromPath(window.location.pathname));
@@ -252,6 +257,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         }
       });
     navigateToScreen('home');
+  };
+
+  const handleTeamCreated = (room: Room) => {
+    setTeamRoom(room);
   };
 
   const stopRecording = () => {
@@ -384,7 +393,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setRecordingError('ログイン状態を確認中です。少し待ってから再度お試しください。');
       return;
     }
-    if (!roomCode) {
+    const recordingRoomCode = currentScreen === 'solo_record' ? roomCode : teamRoom?.code;
+    if (!recordingRoomCode) {
       setRecordingError('位置情報の記録にはログインが必要です。ログイン後にもう一度お試しください。');
       return;
     }
@@ -408,7 +418,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     let socket: WebSocket;
     try {
-      socket = connectToRoom(roomCode);
+      socket = connectToRoom(recordingRoomCode);
       socketRef.current = socket;
     } catch (err) {
       console.error('WebSocketの接続を開始できませんでした:', err);
@@ -549,6 +559,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 onNavigateToLogin={() => navigateToScreen('login')}
                 onNavigateToRegister={() => navigateToScreen('signin')}
                 onStartSolo={() => navigateToScreen('solo_record')}
+                onTeamCreated={handleTeamCreated}
               />
             </div>
             
@@ -618,12 +629,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 hasLocation={hasLocation} 
                 mode={currentScreen === 'solo_record' ? 'solo' : 'team'}
                 teamName={roomSnapshot?.room.title}
-                hasRoom={Boolean(roomCode)}
+                hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
                 isMembersLoading={currentScreen === 'before_record' && (
-                  !sessionLoaded || (Boolean(roomCode) && !roomSnapshot && !roomDataError)
+                  !sessionLoaded || (Boolean(teamRoom?.code) && !roomSnapshot && !roomDataError)
                 )}
-                inviteUrl={roomCode ? buildInviteUrl(roomCode) : undefined}
+                inviteUrl={teamRoom ? buildInviteUrl(teamRoom.code) : undefined}
                 isRecording={isRecording}
                 isConnecting={isConnecting}
                 recordingMessage={recordingMessage}
@@ -643,7 +654,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
             <Setting 
               teamName={roomSnapshot?.room.title}
-              hasRoom={Boolean(roomCode)}
+              hasRoom={Boolean(window.location.pathname === '/solo' ? roomCode : teamRoom)}
               members={roomSnapshot?.members
                 .filter((member) => !member.banned)
                 .map((member) => {
@@ -661,8 +672,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                   };
                 })}
               memberCount={roomSnapshot?.members.filter((member) => !member.banned).length}
-              isMembersLoading={!sessionLoaded || Boolean(roomCode && !roomSnapshot && !roomDataError)}
-              inviteUrl={roomCode ? buildInviteUrl(roomCode) : undefined}
+              isMembersLoading={!sessionLoaded || Boolean(teamRoom && !roomSnapshot && !roomDataError)}
+              inviteUrl={teamRoom ? buildInviteUrl(teamRoom.code) : undefined}
               initialColor={userColor}
               onBack={() => navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record')}
               onSaveAndReturn={(selectedColor) => {
