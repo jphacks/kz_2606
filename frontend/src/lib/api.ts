@@ -45,6 +45,14 @@ export async function getCurrentUser(): Promise<User | null> {
   return session?.user ?? null;
 }
 
+export async function logout(): Promise<void> {
+  const response = await fetch('/api/auth/logout', { method: 'POST' });
+  if (!response.ok) {
+    const payload: unknown = await response.json();
+    throw new Error(getApiErrorMessage(payload, 'ログアウトに失敗しました'));
+  }
+}
+
 export async function getCurrentSession(): Promise<AuthSession | null> {
   const response = await fetch('/api/auth/me');
   if (response.status === 401) {
