@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { UserRound, KeyRound, ArrowRight } from 'lucide-react';
 import { getApiErrorMessage, parseAuthUser } from '../lib/api';
 import type { User } from '../lib/types';
+import AuthMapHero from './AuthMapHero';
 
 interface RegisterProps {
   onNavigateToLogin?: () => void;
@@ -96,12 +97,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegi
           </p>
         </div>
 
-        {/* マッププレースホルダー画像エリア */}
-        <div className="mb-6 rounded-2xl overflow-hidden shadow-md border border-[#E2EBDD] bg-[#E8F0E5] h-44 relative flex items-center justify-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#E2EBDD]/50 to-[#D4E4D0]/50 flex items-center justify-center text-[#7A9A88] text-xs font-medium">
-            Map Preview Area
-          </div>
-        </div>
+        <AuthMapHero />
 
         {/* 新規登録フォームカード */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#E2EBDD] mb-6">
