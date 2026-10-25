@@ -594,9 +594,10 @@ routeが無い場合は切断中にサーバー側で終了済みなので、新
 | `MAX_ACCURACY_M` | 30 | `frontend/src/lib/geo.ts` | — |
 | `MIN_DISTANCE_M` | 5 | 同 | **点の総数を直接決める。** 1mにすると5倍 |
 | `MAX_SPEED_MPS` | 14 | 同 | — |
-| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
+| `GAP_MS` | 30,000 | 同 | `TrackBuffer` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
 | `GapMillis` | 30,000 | `backend/internal/domain/distance.go` | `snapshot.routes[].meters` の算出。**`GAP_MS` と連動** |
-| `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/hooks/useTracks.ts` | 描画性能 |
+| `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/lib/track_buffer.ts`（`maxTrackSegmentPoints`） | 描画性能。1本の Leaflet ポリラインの上限。超えたら確定して次のセグメントへ |
+| 間引きの許容値 | 5m | `frontend/src/lib/geo.ts`（`trackSimplificationToleranceMeters`） | **`MIN_DISTANCE_M` と同値に保つ。** これを採否より大きくすると、わざわざ残した点を描画で落とすことになる |
 | `FLUSH_MS` | 3,000 | `frontend/src/hooks/useRecorder.ts` | 送信頻度 = `stats` の更新頻度 |
 | `CHUNK` | 500 | `frontend/src/lib/ws.ts` | **`maxMessageSize` 64KB を超えない上限** |
 | `MAX`（outbox） | 20,000 | `frontend/src/lib/outbox.ts` | — |

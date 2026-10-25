@@ -100,6 +100,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     if (routeId === null || !buffer || memberId === null) return;
 
     preservedMetersRef.current += buffer.totalMeters;
+    buffer.finalize();
     otherTracksRef.current.set(routeId, {
       routeId,
       memberId,
@@ -215,6 +216,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           for (const point of routePoints.get(route.id) ?? []) {
             buffer.add(point);
           }
+          if (route.endedAt !== null) {
+            buffer.finalize();
+          }
           otherTracksRef.current.set(route.id, {
             routeId: route.id,
             memberId: route.member,
@@ -320,6 +324,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         }
         if (routeEnd.memberId === myMemberId && activeRouteIdRef.current === routeEnd.routeId) {
           preserveActiveTrack();
+        } else {
+          otherTracksRef.current.get(routeEnd.routeId)?.buffer.finalize();
         }
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
