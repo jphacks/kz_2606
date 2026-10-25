@@ -5,29 +5,31 @@ import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
-import { getCurrentSession } from './lib/api';
+import { buildInviteUrl, getCurrentSession } from './lib/api';
 import { shouldAcceptPoint } from './lib/geo';
-import { connectToRoom, flushIntervalMilliseconds, sendPoints, sendStart, sendStop } from './lib/ws';
+import { connectToRoom, flushIntervalMilliseconds, parseRoomMember, parseRoomSnapshot, sendPoints, sendStart, sendStop } from './lib/ws';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, User } from './lib/types';
+import type { Point, RoomSnapshot, User } from './lib/types';
 
-type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin';
+type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
+
+function formatRouteElapsedTime(milliseconds: number): string {
+  const totalMinutes = Math.floor(milliseconds / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}時間${minutes}分` : `${minutes}分`;
+}
 
 function getScreenFromPath(path: string): Screen {
   if (path === '/login') return 'login';
   if (path === '/signin') return 'signin';
   if (path === '/solo') return 'solo_record';
+  if (path === '/result') return 'result';
   return 'home';
 }
 
 export default function App() {
-  const path = window.location.pathname;
-
-  if (path === '/result') {
-    return <Result />;
-  }
-
-  return <MainExperience initialScreen={getScreenFromPath(path)} />;
+  return <MainExperience initialScreen={getScreenFromPath(window.location.pathname)} />;
 }
 
 function MainExperience({ initialScreen }: { initialScreen: Screen }) {
@@ -37,6 +39,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [userColor, setUserColor] = useState('#0E7861'); // 選択した軌跡カラー
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [roomTitle, setRoomTitle] = useState<string | null>(null);
+  const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
+  const [roomDataError, setRoomDataError] = useState('');
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [authError, setAuthError] = useState('');
   const [recordingError, setRecordingError] = useState('');
@@ -68,6 +73,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (isMounted && authRequestVersion.current === requestVersion) {
           setUser(session?.user ?? null);
           setRoomCode(session?.room.code ?? null);
+          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -96,6 +102,111 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   }, []);
 
   useEffect(() => {
+    const isTeamScreen = currentScreen === 'before_record' ||
+      (currentScreen === 'setting' && window.location.pathname !== '/solo');
+    if (!sessionLoaded || !roomCode || !isTeamScreen) {
+      setRoomSnapshot(null);
+      setRoomDataError('');
+      return;
+    }
+
+    let isActive = true;
+    setRoomSnapshot(null);
+    setRoomDataError('');
+    let socket: WebSocket;
+    try {
+      socket = connectToRoom(roomCode);
+    } catch (error) {
+      console.error('チーム情報の接続を開始できませんでした:', error);
+      setRoomDataError('チーム情報を取得できませんでした。接続を確認してください。');
+      return;
+    }
+
+    socket.onmessage = (event: MessageEvent<string>) => {
+      if (!isActive) return;
+      let message: unknown;
+      try {
+        message = JSON.parse(event.data);
+      } catch (error) {
+        console.error('チーム情報の応答を解析できませんでした:', error);
+        setRoomDataError('チーム情報を読み取れませんでした。');
+        return;
+      }
+
+      if (typeof message !== 'object' || message === null || !('t' in message)) return;
+      if (message.t === 'snapshot') {
+        const snapshot = parseRoomSnapshot(message);
+        if (!snapshot) {
+          console.error('サーバーから不正なチーム情報が返されました:', message);
+          setRoomDataError('サーバーから不正なチーム情報が返されました。');
+          return;
+        }
+        if (snapshot.room.code.toUpperCase() !== roomCode.toUpperCase()) {
+          console.error('別のルームの情報を受信しました:', snapshot.room.code);
+          setRoomDataError('別のチーム情報を受信しました。再読み込みしてください。');
+          return;
+        }
+        setRoomSnapshot(snapshot);
+        setRoomDataError('');
+      } else if (message.t === 'member' && 'member' in message) {
+        const member = parseRoomMember(message.member);
+        if (!member) {
+          console.error('サーバーから不正なメンバー情報が返されました:', message);
+          return;
+        }
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          members: [
+            ...snapshot.members.filter((current) => current.id !== member.id),
+            member,
+          ],
+        }) : snapshot);
+      } else if (message.t === 'leave' && 'member' in message && typeof message.member === 'number') {
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          members: snapshot.members.map((member) => member.id === message.member
+            ? { ...member, online: false }
+            : member),
+        }) : snapshot);
+      } else if (
+        (message.t === 'banned' || message.t === 'unbanned') &&
+        'member' in message &&
+        typeof message.member === 'number'
+      ) {
+        const banned = message.t === 'banned';
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          members: snapshot.members.map((member) => member.id === message.member
+            ? { ...member, banned }
+            : member),
+        }) : snapshot);
+      } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          routes: snapshot.routes.filter((route) => route.id !== message.route),
+        }) : snapshot);
+      } else if (message.t === 'error' && 'message' in message && typeof message.message === 'string') {
+        setRoomDataError(message.message);
+      }
+    };
+    socket.onerror = () => {
+      if (!isActive) return;
+      console.error('チーム情報のWebSocket通信に失敗しました');
+      setRoomDataError('チーム情報を取得できませんでした。接続を確認してください。');
+    };
+    socket.onclose = () => {
+      if (isActive) {
+        setRoomDataError((error) => error || 'チーム情報との接続が終了しました。再読み込みしてください。');
+      }
+    };
+
+    return () => {
+      isActive = false;
+      socket.close();
+    };
+  }, [currentScreen, roomCode, sessionLoaded]);
+
+  useEffect(() => {
     const handlePopState = () => setCurrentScreen(getScreenFromPath(window.location.pathname));
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -107,6 +218,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       login: '/login',
       signin: '/signin',
       solo_record: '/solo',
+      result: '/result',
     };
     const path = pathByScreen[screen];
     if (path && window.location.pathname !== path) {
@@ -128,6 +240,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       .then((session) => {
         if (authRequestVersion.current === requestVersion) {
           setRoomCode(session?.room.code ?? null);
+          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -421,6 +534,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             {recordingError}
           </div>
         )}
+        {roomDataError && (
+          <div role="alert" className="px-4 py-2 text-sm text-red-700 bg-red-50">
+            {roomDataError}
+          </div>
+        )}
 
         {/* 1. ホーム画面 */}
         {currentScreen === 'home' && (
@@ -470,6 +588,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           </div>
         )}
 
+        {currentScreen === 'result' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Result username={user?.username} roomName={roomTitle ?? undefined} />
+          </div>
+        )}
+
         {/* 4. 記録前画面 ＆ マップ */}
         {(currentScreen === 'before_record' || currentScreen === 'solo_record') && (
           <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
@@ -493,6 +617,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               <BeforeRecord 
                 hasLocation={hasLocation} 
                 mode={currentScreen === 'solo_record' ? 'solo' : 'team'}
+                teamName={roomSnapshot?.room.title}
+                hasRoom={Boolean(roomCode)}
+                members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
+                isMembersLoading={currentScreen === 'before_record' && (
+                  !sessionLoaded || (Boolean(roomCode) && !roomSnapshot && !roomDataError)
+                )}
+                inviteUrl={roomCode ? buildInviteUrl(roomCode) : undefined}
                 isRecording={isRecording}
                 isConnecting={isConnecting}
                 recordingMessage={recordingMessage}
@@ -511,6 +642,27 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         {currentScreen === 'setting' && (
           <div style={{ flex: 1, overflowY: 'auto', zIndex: 20, backgroundColor: '#FAFAFA' }}>
             <Setting 
+              teamName={roomSnapshot?.room.title}
+              hasRoom={Boolean(roomCode)}
+              members={roomSnapshot?.members
+                .filter((member) => !member.banned)
+                .map((member) => {
+                  const memberRoutes = roomSnapshot.routes.filter((route) => route.member === member.id);
+                  const meters = memberRoutes.reduce((total, route) => total + route.meters, 0);
+                  const elapsedMs = memberRoutes.reduce((total, route) => total + route.elapsedMs, 0);
+                  return {
+                    id: String(member.id),
+                    name: member.displayName,
+                    status: member.recording ? '記録中' : member.online ? 'オンライン' : 'オフライン',
+                    distance: meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`,
+                    elapsed: elapsedMs > 0 ? formatRouteElapsedTime(elapsedMs) : undefined,
+                    color: member.color,
+                    isMe: member.id === roomSnapshot.you.id,
+                  };
+                })}
+              memberCount={roomSnapshot?.members.filter((member) => !member.banned).length}
+              isMembersLoading={!sessionLoaded || Boolean(roomCode && !roomSnapshot && !roomDataError)}
+              inviteUrl={roomCode ? buildInviteUrl(roomCode) : undefined}
               initialColor={userColor}
               onBack={() => navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record')}
               onSaveAndReturn={(selectedColor) => {

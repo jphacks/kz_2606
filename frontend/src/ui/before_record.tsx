@@ -1,9 +1,15 @@
 import { useState } from 'react';
 import { ArrowLeft, Settings, Users, Copy, Check, MapPin, Play, Square } from 'lucide-react';
+import type { RoomMember } from '../lib/types';
 
 interface BeforeRecordProps {
   hasLocation?: boolean;
   mode?: 'team' | 'solo';
+  teamName?: string;
+  hasRoom?: boolean;
+  members?: RoomMember[];
+  isMembersLoading?: boolean;
+  inviteUrl?: string;
   isRecording?: boolean;
   isConnecting?: boolean;
   recordingMessage?: string;
@@ -18,6 +24,11 @@ interface BeforeRecordProps {
 export default function BeforeRecord({
   hasLocation,
   mode = 'team',
+  teamName,
+  hasRoom = false,
+  members = [],
+  isMembersLoading = false,
+  inviteUrl,
   isRecording = false,
   isConnecting = false,
   recordingMessage,
@@ -29,6 +40,7 @@ export default function BeforeRecord({
   onOpenSetting,
 }: BeforeRecordProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
   const isSolo = mode === 'solo';
   const formattedElapsedTime = `${String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:${String(
     Math.floor((elapsedSeconds % 3600) / 60)
@@ -38,12 +50,15 @@ export default function BeforeRecord({
     : `${Math.round(distanceTravelled)} m`;
 
   const handleCopyInvite = async () => {
+    if (!inviteUrl) return;
+    setCopyError('');
     try {
-      await navigator.clipboard.writeText("https://machie.app/invite/sample");
+      await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.warn("クリップボードへのコピーに失敗しました:", err);
+    } catch (error) {
+      console.error('招待リンクをコピーできませんでした:', error);
+      setCopyError('招待リンクをコピーできませんでした');
     }
   };
 
@@ -64,9 +79,9 @@ export default function BeforeRecord({
           )}
           <div className="bg-white/90 backdrop-blur-md px-3.5 py-1.5 rounded-full shadow-md flex items-center gap-2 border border-gray-100">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span className="text-xs font-bold text-gray-800">{isSolo ? '一人で記録' : 'まちあるき部'}</span>
-            <span className="text-gray-300">|</span>
-            <span className="text-xs text-gray-500">吉祥寺</span>
+            <span className="text-xs font-bold text-gray-800">
+              {isSolo ? '一人で記録' : teamName ?? (isMembersLoading ? 'チーム情報を取得中' : hasRoom ? 'チーム情報を取得できません' : 'チーム未参加')}
+            </span>
           </div>
         </div>
 
@@ -98,7 +113,7 @@ export default function BeforeRecord({
           <p className="text-[11px] text-gray-500 leading-snug">
             {isSolo
               ? '好きな場所を自由に歩いて、自分だけのGPSアートを作りましょう。'
-              : '4つの色で、ひとつのハート。担当のルートを歩いて、軌跡をつなげよう。'}
+              : 'みんなでルートを歩いて、軌跡をつなげましょう。'}
           </p>
         </div>
 
@@ -122,13 +137,24 @@ export default function BeforeRecord({
         {/* 参加メンバー一覧 */}
         {!isSolo && <div className="flex items-center justify-between py-1.5 border-y border-gray-100">
           <div className="flex items-center -space-x-2">
-            <div className="w-7 h-7 rounded-full bg-emerald-700 text-white flex items-center justify-center text-[11px] font-bold border-2 border-white shadow-sm">さ</div>
-            <div className="w-7 h-7 rounded-full bg-amber-600 text-white flex items-center justify-center text-[11px] font-bold border-2 border-white shadow-sm">ゆ</div>
-            <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-[11px] font-bold border-2 border-white shadow-sm">は</div>
-            <div className="w-7 h-7 rounded-full bg-pink-600 text-white flex items-center justify-center text-[11px] font-bold border-2 border-white shadow-sm">り</div>
+            {members.filter((member) => !member.banned).map((member) => (
+              <div
+                key={member.id}
+                className="w-7 h-7 rounded-full text-white flex items-center justify-center text-[11px] font-bold border-2 border-white shadow-sm"
+                style={{ backgroundColor: member.color }}
+                title={member.displayName}
+              >
+                {member.displayName.charAt(0)}
+              </div>
+            ))}
           </div>
           <span className="text-[11px] font-bold text-gray-600 flex items-center gap-1">
-            <Users size={13} className="text-gray-400" /> 4人が参加済み
+            <Users size={13} className="text-gray-400" />
+            {isMembersLoading
+              ? 'メンバー情報を取得中'
+              : hasRoom
+                ? `${members.filter((member) => !member.banned).length}人が参加中`
+                : 'チーム未参加'}
           </span>
         </div>}
 
@@ -140,17 +166,21 @@ export default function BeforeRecord({
             </div>
             <div className="truncate">
               <p className="text-[9px] font-bold text-gray-400 leading-none">招待URLをシェア</p>
-              <p className="text-[11px] font-medium text-gray-700 truncate mt-0.5">machie.app/t/machiaruki</p>
+              <p className="text-[11px] font-medium text-gray-700 truncate mt-0.5">
+                {inviteUrl ?? (hasRoom ? '招待リンクを取得できません' : 'チーム未参加')}
+              </p>
             </div>
           </div>
           <button 
             onClick={handleCopyInvite}
+            disabled={!inviteUrl}
             className="px-2.5 py-1 bg-white border border-gray-200 rounded-lg text-[11px] font-bold text-gray-700 hover:bg-gray-100 transition shadow-xs flex items-center gap-1 shrink-0"
           >
             {copied ? <Check size={11} className="text-emerald-600" /> : null}
             {copied ? 'コピー済' : 'コピー'}
           </button>
         </div>}
+        {copyError && <p role="alert" className="text-[11px] text-red-600">{copyError}</p>}
 
         {/* 位置情報のステータス */}
         <div className="flex items-center gap-1 text-[11px] text-emerald-600 font-medium px-0.5">

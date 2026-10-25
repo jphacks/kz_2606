@@ -22,4 +22,27 @@ export interface AuthSession {
   room: Room;
 }
 
+export interface RoomMember {
+  id: number;
+  displayName: string;
+  color: string;
+  online: boolean;
+  banned: boolean;
+  recording: boolean;
+}
+
+export interface RoomRouteStats {
+  id: number;
+  member: number;
+  meters: number;
+  elapsedMs: number;
+}
+
+export interface RoomSnapshot {
+  room: Pick<Room, 'code' | 'title'>;
+  you: Pick<RoomMember, 'id'>;
+  members: RoomMember[];
+  routes: RoomRouteStats[];
+}
+
 export type Point = [lat: number, lng: number, ts: number, acc: number];
