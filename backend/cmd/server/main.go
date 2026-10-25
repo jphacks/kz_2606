@@ -56,6 +56,10 @@ func run() error {
 	roomService := usecase.NewRoomService(persistence.NewRoomRepository(pool))
 	sessionService := usecase.NewSessionService(persistence.NewSessionRepository(pool))
 	wsRegistry := ws.NewRegistry()
+	webFiles, err := staticFS()
+	if err != nil {
+		return err
+	}
 	mux := rest.NewRouter(
 		authService,
 		roomService,
@@ -65,6 +69,7 @@ func run() error {
 		},
 		wsRegistry,
 	)
+	mux.Handle("GET /", rest.StaticHandler(webFiles))
 	mux.Handle("/ws", ws.NewHandler(authService, roomService, wsRegistry, sessionService))
 
 	server := &http.Server{
