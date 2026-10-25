@@ -7,6 +7,7 @@ interface BeforeRecordProps {
   mode?: 'team' | 'solo';
   teamName?: string;
   hasRoom?: boolean;
+  roomClosed?: boolean;
   members?: RoomMember[];
   isMembersLoading?: boolean;
   inviteUrl?: string;
@@ -26,6 +27,7 @@ export default function BeforeRecord({
   mode = 'team',
   teamName,
   hasRoom = false,
+  roomClosed = false,
   members = [],
   isMembersLoading = false,
   inviteUrl,
@@ -81,6 +83,7 @@ export default function BeforeRecord({
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span className="text-xs font-bold text-gray-800">
               {isSolo ? '一人で記録' : teamName ?? (isMembersLoading ? 'チーム情報を取得中' : hasRoom ? 'チーム情報を取得できません' : 'チーム未参加')}
+              {!isSolo && roomClosed ? '（締切中）' : ''}
             </span>
           </div>
         </div>
@@ -203,10 +206,11 @@ export default function BeforeRecord({
         {/* 記録開始ボタン */}
         <button
           onClick={onStartRecording}
-          className="w-full py-3 bg-[#0E7861] hover:bg-[#0b5f4d] active:scale-[0.98] transition text-white rounded-xl font-bold text-sm shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2"
+          disabled={roomClosed && !isRecording && !isConnecting}
+          className="w-full py-3 bg-[#0E7861] hover:bg-[#0b5f4d] disabled:bg-gray-400 disabled:cursor-not-allowed active:scale-[0.98] transition text-white rounded-xl font-bold text-sm shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2"
         >
           {isRecording ? <Square size={16} fill="white" /> : <Play size={16} fill="white" />}
-          <span>{isConnecting ? '接続中（タップで中止）' : isRecording ? '記録を終了' : '記録開始'}</span>
+          <span>{isConnecting ? '接続中（タップで中止）' : isRecording ? '記録を終了' : roomClosed ? '締切中' : '記録開始'}</span>
         </button>
 
         {/* 注意書き */}
