@@ -12,10 +12,12 @@ import {
   connectToRoom,
   flushIntervalMilliseconds,
   parsePointsEvent,
+  parseRecordingGateEvent,
   parseRoomMember,
   parseRoomSnapshot,
   parseRouteEndEvent,
   parseRouteStartedEvent,
+  sendMember,
   sendPoints,
   sendStart,
   sendStop,
@@ -67,6 +69,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [soloActivityName, setSoloActivityName] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
+  const [hasTeamInviteQr, setHasTeamInviteQr] = useState(false);
+  const [showTeamInviteQr, setShowTeamInviteQr] = useState(false);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   const [otherTracks, setOtherTracks] = useState<RoomRouteTrack[]>([]);
   const [roomDataError, setRoomDataError] = useState('');
@@ -95,6 +99,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const activeRouteColorRef = useRef(userColor);
   const preservedMetersRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const roomSocketRef = useRef<WebSocket | null>(null);
+  const pendingMemberColorRef = useRef<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
   const routeStartedRef = useRef(false);
@@ -242,11 +248,21 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     let socket: WebSocket;
     try {
       socket = connectToRoom(activeRoomCode);
+      roomSocketRef.current = socket;
     } catch (error) {
       console.error('チーム情報の接続を開始できませんでした:', error);
       setRoomDataError('チーム情報を取得できませんでした。接続を確認してください。');
       return;
     }
+
+    socket.onopen = () => {
+      if (!isActive || roomSocketRef.current !== socket) return;
+      const pendingColor = pendingMemberColorRef.current;
+      if (pendingColor !== null) {
+        sendMember(socket, pendingColor);
+        pendingMemberColorRef.current = null;
+      }
+    };
 
     socket.onmessage = (event: MessageEvent<string>) => {
       if (!isActive) return;
@@ -410,6 +426,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             ? { ...member, recording: false }
             : member),
         }) : snapshot);
+      } else if (message.t === 'recording_gate') {
+        const enabled = parseRecordingGateEvent(message);
+        if (enabled === null) return;
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, recordingEnabled: enabled },
+        }) : snapshot);
       } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
         otherTracksRef.current.delete(message.route);
         setOtherTracks([...otherTracksRef.current.values()]);
@@ -447,6 +470,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     return () => {
       isActive = false;
+      if (roomSocketRef.current === socket) roomSocketRef.current = null;
       socket.close();
     };
   }, [currentScreen, roomCode, sessionLoaded, teamRoom?.code]);
@@ -512,10 +536,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
   const handleTeamCreated = (room: Room) => {
     setTeamRoom(room);
+    setHasTeamInviteQr(true);
+    setShowTeamInviteQr(true);
+    navigateToScreen('before_record', true);
   };
 
   const handleJoinSuccess = (room: Room, member: Pick<RoomMember, 'color'>) => {
     setTeamRoom(room);
+    setHasTeamInviteQr(false);
+    setShowTeamInviteQr(false);
     setUserColor(normalizeMemberColor(member.color));
     setRoomDataError('');
     setInviteRoomCode(null);
@@ -533,6 +562,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setUser(null);
       setRoomCode(null);
       setTeamRoom(null);
+      setHasTeamInviteQr(false);
+      setShowTeamInviteQr(false);
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
       activeTrackBufferRef.current = null;
@@ -948,7 +979,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         startLocationWatch(recordingBufferRef.current);
         void resumeActiveRoute(socket, room, startedRouteId);
       } else if (message.t === 'route_end' && 'route' in message && message.route === routeIdRef.current) {
-        completeRecordingStop(socket);
+        const endedRouteId = routeIdRef.current;
+        void persistPendingPoints(room, endedRouteId)
+          .catch((error: unknown) => {
+            console.error('管理者による記録終了前の未送信位置情報を保存できませんでした:', error);
+            setRecordingError('記録終了前の未送信位置情報を保存できませんでした。');
+          })
+          .finally(() => completeRecordingStop(socket));
       } else if (message.t === 'error') {
         const messageText = 'message' in message && typeof message.message === 'string'
           ? message.message
@@ -1207,6 +1244,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 otherTracks={otherTracks.filter((track) =>
                   !roomSnapshot?.members.find((member) => member.id === track.memberId)?.banned
                 )}
+                inviteUrl={currentScreen === 'before_record' && hasTeamInviteQr && teamRoom
+                  ? buildInviteUrl(teamRoom.code)
+                  : undefined}
+                showInviteQr={showTeamInviteQr}
+                onShowInviteQr={() => setShowTeamInviteQr(true)}
+                onDismissInviteQr={() => setShowTeamInviteQr(false)}
               />
             </div>
             <div style={{
@@ -1230,6 +1273,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
                 roomClosed={Boolean(roomSnapshot?.room.closedAt)}
+                recordingEnabled={currentScreen === 'solo_record' || Boolean(roomSnapshot?.room.recordingEnabled)}
+                isOwner={currentScreen === 'solo_record' || roomSnapshot?.room.ownerMemberId === roomSnapshot?.you.id}
                 isMembersLoading={currentScreen === 'before_record' && (
                   !sessionLoaded || (Boolean(teamRoom?.code) && !roomSnapshot && !roomDataError)
                 )}
@@ -1279,6 +1324,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               onBack={() => navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record')}
               onSaveAndReturn={(selectedColor) => {
                 setUserColor(selectedColor);
+                pendingMemberColorRef.current = selectedColor;
+                const socket = roomSocketRef.current ?? socketRef.current;
+                if (socket?.readyState === WebSocket.OPEN) {
+                  sendMember(socket, selectedColor);
+                  pendingMemberColorRef.current = null;
+                }
                 navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record');
               }}
             />

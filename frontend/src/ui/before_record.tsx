@@ -8,6 +8,8 @@ interface BeforeRecordProps {
   teamName?: string;
   hasRoom?: boolean;
   roomClosed?: boolean;
+  recordingEnabled?: boolean;
+  isOwner?: boolean;
   members?: RoomMember[];
   isMembersLoading?: boolean;
   inviteUrl?: string;
@@ -28,6 +30,8 @@ export default function BeforeRecord({
   teamName,
   hasRoom = false,
   roomClosed = false,
+  recordingEnabled = true,
+  isOwner = false,
   members = [],
   isMembersLoading = false,
   inviteUrl,
@@ -44,6 +48,7 @@ export default function BeforeRecord({
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
   const isSolo = mode === 'solo';
+  const waitingForOwner = !isSolo && !isOwner && !recordingEnabled && !isRecording && !isConnecting;
   const formattedElapsedTime = `${String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0')}:${String(
     Math.floor((elapsedSeconds % 3600) / 60)
   ).padStart(2, '0')}:${String(elapsedSeconds % 60).padStart(2, '0')}`;
@@ -206,16 +211,18 @@ export default function BeforeRecord({
         {/* 記録開始ボタン */}
         <button
           onClick={onStartRecording}
-          disabled={roomClosed && !isRecording && !isConnecting}
+          disabled={(roomClosed || waitingForOwner) && !isRecording && !isConnecting}
           className="w-full py-3 bg-[#0E7861] hover:bg-[#0b5f4d] disabled:bg-gray-400 disabled:cursor-not-allowed active:scale-[0.98] transition text-white rounded-xl font-bold text-sm shadow-md shadow-emerald-900/20 flex items-center justify-center gap-2"
         >
           {isRecording ? <Square size={16} fill="white" /> : <Play size={16} fill="white" />}
-          <span>{isConnecting ? '接続中（タップで中止）' : isRecording ? '記録を終了' : roomClosed ? '締切中' : '記録開始'}</span>
+          <span>{isConnecting ? '接続中（タップで中止）' : isRecording ? '記録を終了' : roomClosed ? '締切中' : waitingForOwner ? '管理者の開始待ち' : '記録開始'}</span>
         </button>
 
         {/* 注意書き */}
         <p className="text-[9px] text-center text-gray-400 leading-normal px-1">
-          {isSolo
+          {waitingForOwner
+            ? '管理者が記録を開始すると、メンバーも記録を開始できます。'
+            : isSolo
             ? '周囲の安全を確かめて、歩きながらGPSアートを楽しみましょう。'
             : '開始すると自分の現在地と軌跡がチームに共有されます。周囲の安全を確かめて、歩きながら楽しもう。'}
         </p>

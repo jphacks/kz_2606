@@ -3,7 +3,6 @@ package persistence
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,16 +40,18 @@ func (r *SessionRepository) StartRoute(ctx context.Context, code string, memberI
 	if member.BannedAt != nil {
 		return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrMemberBanned
 	}
-	var active bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1 FROM routes WHERE room_id = $1 AND ended_at IS NULL
-		)
-	`, room.ID).Scan(&active); err != nil {
-		return domain.Room{}, domain.Member{}, domain.Route{}, err
-	}
-	if active {
-		return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrRouteInUse
+	if memberID != room.OwnerMemberID {
+		var ownerRecording bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM routes WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
+			)
+		`, room.ID, room.OwnerMemberID).Scan(&ownerRecording); err != nil {
+			return domain.Room{}, domain.Member{}, domain.Route{}, err
+		}
+		if !ownerRecording {
+			return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrOwnerNotRecording
+		}
 	}
 	var route domain.Route
 	route.MemberID = memberID
@@ -112,45 +113,74 @@ func (r *SessionRepository) AppendPoints(ctx context.Context, code string, membe
 	return routeID, member, nil
 }
 
-func (r *SessionRepository) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, time.Time, error) {
+func (r *SessionRepository) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	room, err := lockSessionRoom(ctx, tx, code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	member, err := lockSessionMember(ctx, tx, room.ID, memberID)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	if member.BannedAt != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, domain.ErrMemberBanned
+		return domain.Room{}, domain.Member{}, nil, domain.ErrMemberBanned
 	}
-	var routeID int64
-	var endedAt time.Time
-	err = tx.QueryRow(ctx, `
-		UPDATE routes SET ended_at = now()
-		WHERE id = (
-			SELECT id FROM routes
-			WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
-			FOR UPDATE
-		)
-		RETURNING id, ended_at
-	`, room.ID, memberID).Scan(&routeID, &endedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, domain.ErrNoActiveRoute
+
+	routeEnds := make([]domain.RouteEnd, 0, 1)
+	if memberID == room.OwnerMemberID {
+		rows, queryErr := tx.Query(ctx, `
+			UPDATE routes SET ended_at = now()
+			WHERE room_id = $1 AND ended_at IS NULL
+			RETURNING id, member_id, ended_at
+		`, room.ID)
+		if queryErr != nil {
+			return domain.Room{}, domain.Member{}, nil, queryErr
+		}
+		for rows.Next() {
+			var routeEnd domain.RouteEnd
+			if scanErr := rows.Scan(&routeEnd.ID, &routeEnd.MemberID, &routeEnd.EndedAt); scanErr != nil {
+				rows.Close()
+				return domain.Room{}, domain.Member{}, nil, scanErr
+			}
+			routeEnds = append(routeEnds, routeEnd)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return domain.Room{}, domain.Member{}, nil, rowsErr
+		}
+		rows.Close()
+	} else {
+		var routeEnd domain.RouteEnd
+		err = tx.QueryRow(ctx, `
+			UPDATE routes SET ended_at = now()
+			WHERE id = (
+				SELECT id FROM routes
+				WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
+				FOR UPDATE
+			)
+			RETURNING id, member_id, ended_at
+		`, room.ID, memberID).Scan(&routeEnd.ID, &routeEnd.MemberID, &routeEnd.EndedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.Room{}, domain.Member{}, nil, domain.ErrNoActiveRoute
+		}
+		if err != nil {
+			return domain.Room{}, domain.Member{}, nil, err
+		}
+		routeEnds = append(routeEnds, routeEnd)
 	}
-	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+	if len(routeEnds) == 0 {
+		return domain.Room{}, domain.Member{}, nil, domain.ErrNoActiveRoute
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
-	return room, member, routeID, endedAt, nil
+	return room, member, routeEnds, nil
 }
 
 func (r *SessionRepository) UpdateMember(ctx context.Context, code string, memberID int64, displayName, color *string) (domain.Member, bool, error) {
@@ -197,48 +227,78 @@ func (r *SessionRepository) UpdateMember(ctx context.Context, code string, membe
 	return member, recording, nil
 }
 
-func (r *SessionRepository) Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, time.Time, bool, error) {
+func (r *SessionRepository) Leave(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Member{}, 0, time.Time{}, false, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	room, err := lockSessionRoom(ctx, tx, code)
 	if err != nil {
-		return domain.Member{}, 0, time.Time{}, false, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	member, err := lockSessionMember(ctx, tx, room.ID, memberID)
 	if err != nil {
-		return domain.Member{}, 0, time.Time{}, false, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
-	var routeID int64
-	var endedAt time.Time
-	err = tx.QueryRow(ctx, `
-		UPDATE routes SET ended_at = now()
-		WHERE id = (
-			SELECT id FROM routes
-			WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
-			FOR UPDATE
-		)
-		RETURNING id, ended_at
-	`, room.ID, memberID).Scan(&routeID, &endedAt)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return domain.Member{}, 0, time.Time{}, false, err
+	routeEnds := make([]domain.RouteEnd, 0, 1)
+	if memberID == room.OwnerMemberID {
+		rows, queryErr := tx.Query(ctx, `
+			UPDATE routes SET ended_at = now()
+			WHERE room_id = $1 AND ended_at IS NULL
+			RETURNING id, member_id, ended_at
+		`, room.ID)
+		if queryErr != nil {
+			return domain.Room{}, domain.Member{}, nil, queryErr
+		}
+		for rows.Next() {
+			var routeEnd domain.RouteEnd
+			if scanErr := rows.Scan(&routeEnd.ID, &routeEnd.MemberID, &routeEnd.EndedAt); scanErr != nil {
+				rows.Close()
+				return domain.Room{}, domain.Member{}, nil, scanErr
+			}
+			routeEnds = append(routeEnds, routeEnd)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return domain.Room{}, domain.Member{}, nil, rowsErr
+		}
+		rows.Close()
+	} else {
+		var routeEnd domain.RouteEnd
+		err = tx.QueryRow(ctx, `
+			UPDATE routes SET ended_at = now()
+			WHERE id = (
+				SELECT id FROM routes
+				WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
+				FOR UPDATE
+			)
+			RETURNING id, member_id, ended_at
+		`, room.ID, memberID).Scan(&routeEnd.ID, &routeEnd.MemberID, &routeEnd.EndedAt)
+		if err == nil {
+			routeEnds = append(routeEnds, routeEnd)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return domain.Room{}, domain.Member{}, nil, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Member{}, 0, time.Time{}, false, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
-	return member, routeID, endedAt, err == nil, nil
+	return room, member, routeEnds, nil
 }
 
 func lockSessionRoom(ctx context.Context, tx pgx.Tx, code string) (domain.Room, error) {
 	var room domain.Room
 	var closedAt pgtype.Timestamptz
 	err := tx.QueryRow(ctx, `
-		SELECT id, code, title, owner_user_id, is_private, closed_at
-		FROM rooms WHERE code = $1 FOR UPDATE
-	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerUserID, &room.IsPrivate, &closedAt)
+		SELECT rooms.id, rooms.code, rooms.title, rooms.owner_user_id,
+		       members.id, rooms.is_private, rooms.closed_at
+		FROM rooms
+		JOIN members ON members.room_id = rooms.id AND members.user_id = rooms.owner_user_id
+		WHERE rooms.code = $1
+		FOR UPDATE OF rooms
+	`, code).Scan(&room.ID, &room.Code, &room.Title, &room.OwnerUserID, &room.OwnerMemberID, &room.IsPrivate, &closedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.Room{}, domain.ErrRoomNotFound
 	}

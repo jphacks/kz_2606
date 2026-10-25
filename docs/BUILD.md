@@ -2,12 +2,32 @@
 
 ## ローカルで起動
 
-Docker Compose で PostgreSQL を起動してから、リポジトリのルートでバックエンドを実行します。
+Docker Compose で PostgreSQL を起動してから、バックエンドとフロントエンドをそれぞれ起動します。
+
+### PostgreSQL
 
 ```powershell
 docker compose up -d db
+```
+
+### バックエンドサーバー
+
+サーバーは既定で `http://localhost:8080` で起動します。
+
+```powershell
 cd backend
 go run ./cmd/server
+```
+
+### フロントエンド
+
+フロントエンド開発サーバーは `http://localhost:5173` で起動します。
+`/api` と `/ws` はバックエンドの `localhost:8080` へプロキシされます。
+
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
 
 既定では `localhost:5432` の開発用 PostgreSQL とポート `8080` を使います。

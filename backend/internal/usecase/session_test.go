@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
@@ -26,8 +25,8 @@ func (r *recordingSessionRepository) AppendPoints(_ context.Context, _ string, _
 	return 8, r.member, nil
 }
 
-func (r *recordingSessionRepository) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, time.Time, error) {
-	return domain.Room{}, r.member, 8, time.Time{}, nil
+func (r *recordingSessionRepository) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
+	return domain.Room{}, r.member, []domain.RouteEnd{{ID: 8}}, nil
 }
 
 func (r *recordingSessionRepository) UpdateMember(_ context.Context, _ string, _ int64, displayName, color *string) (domain.Member, bool, error) {
@@ -42,8 +41,8 @@ func (r *recordingSessionRepository) UpdateMember(_ context.Context, _ string, _
 	return r.member, r.recording, nil
 }
 
-func (r *recordingSessionRepository) Leave(context.Context, string, int64) (domain.Member, int64, time.Time, bool, error) {
-	return r.member, 0, time.Time{}, false, nil
+func (r *recordingSessionRepository) Leave(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
+	return domain.Room{}, r.member, nil, nil
 }
 
 func TestSessionServiceValidatesAndNormalizesPoints(t *testing.T) {

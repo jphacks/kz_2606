@@ -11,6 +11,13 @@ type Route struct {
 	Points    []Point
 }
 
+// RouteEnd はサーバーが終了させた route の通知に使う。
+type RouteEnd struct {
+	ID       int64
+	MemberID int64
+	EndedAt  time.Time
+}
+
 // RouteStats は route 1本の集計。UI の「経路の長さ・経過時間」表示に使う。
 // 部屋全体の合計が欲しい場合は、クライアントが route の分を足す。
 type RouteStats struct {
@@ -38,8 +45,7 @@ func (r Route) Stats(now time.Time) RouteStats {
 }
 
 // Recording は記録中（編集可）かどうか。
-// 部屋の中で記録中の route は同時に1本までという不変条件がある。
-// 仕様: DATA_MODEL.md 7章
+// メンバーごとに記録中かどうかを表す。
 func (r Route) Recording() bool {
 	return r.EndedAt == nil
 }

@@ -5,7 +5,7 @@ describe('parseRoomSnapshot', () => {
   it('preserves route metadata and returns snapshot points', () => {
     const parsed = parseRoomSnapshot({
       t: 'snapshot',
-      room: { code: 'ROOM01', title: 'Test room', closedAt: null },
+      room: { code: 'ROOM01', title: 'Test room', ownerMemberId: 7, recordingEnabled: true, closedAt: null },
       you: { id: 7 },
       members: [{
         id: 7,
