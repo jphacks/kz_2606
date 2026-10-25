@@ -26,9 +26,9 @@ const (
 type recordingSession interface {
 	StartRoute(context.Context, string, int64) (domain.Room, domain.Member, domain.Route, error)
 	AppendPoints(context.Context, string, int64, []domain.Point) (int64, domain.Member, error)
-	StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, time.Time, error)
+	StopRoute(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error)
 	UpdateMember(context.Context, string, int64, *string, *string) (domain.Member, bool, error)
-	Leave(context.Context, string, int64) (domain.Member, int64, time.Time, bool, error)
+	Leave(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error)
 }
 
 type client struct {
@@ -193,13 +193,16 @@ func (c *client) handleStart() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
 	defer cancel()
-	_, member, route, err := c.sessions.StartRoute(ctx, c.roomCode, c.memberID)
+	room, member, route, err := c.sessions.StartRoute(ctx, c.roomCode, c.memberID)
 	if err != nil {
 		c.sendSessionError(err)
 		return
 	}
 	c.registry.BroadcastRoute(c.roomCode, route, member, 0)
 	c.registry.BroadcastMember(c.roomCode, member, true, 0)
+	if member.ID == room.OwnerMemberID {
+		c.registry.BroadcastRecordingGate(c.roomCode, true)
+	}
 }
 
 func (c *client) handlePoints(payload []byte) {
@@ -253,13 +256,20 @@ func (c *client) handleStop() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
 	defer cancel()
-	_, member, routeID, endedAt, err := c.sessions.StopRoute(ctx, c.roomCode, c.memberID)
+	room, member, routeEnds, err := c.sessions.StopRoute(ctx, c.roomCode, c.memberID)
 	if err != nil {
 		c.sendSessionError(err)
 		return
 	}
-	c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, endedAt, 0)
-	c.registry.BroadcastMember(c.roomCode, member, false, 0)
+	for _, routeEnd := range routeEnds {
+		c.registry.BroadcastRouteEnd(c.roomCode, routeEnd.ID, routeEnd.MemberID, routeEnd.EndedAt, 0)
+	}
+	if len(routeEnds) > 0 {
+		c.registry.BroadcastMember(c.roomCode, member, false, 0)
+	}
+	if member.ID == room.OwnerMemberID {
+		c.registry.BroadcastRecordingGate(c.roomCode, false)
+	}
 }
 
 func (c *client) handleMember(payload []byte) {
@@ -292,15 +302,20 @@ func (c *client) handleLeave() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
 	defer cancel()
-	member, routeID, endedAt, ended, err := c.sessions.Leave(ctx, c.roomCode, c.memberID)
+	room, member, routeEnds, err := c.sessions.Leave(ctx, c.roomCode, c.memberID)
 	if err != nil {
 		slog.Error("close route after websocket disconnect failed", "room", c.roomCode, "member", c.memberID, "err", err)
 		c.registry.BroadcastLeave(c.roomCode, c.memberID)
 		return
 	}
-	if ended {
-		c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, endedAt, 0)
+	if len(routeEnds) > 0 {
+		for _, routeEnd := range routeEnds {
+			c.registry.BroadcastRouteEnd(c.roomCode, routeEnd.ID, routeEnd.MemberID, routeEnd.EndedAt, 0)
+		}
 		c.registry.BroadcastMember(c.roomCode, member, false, 0)
+		if member.ID == room.OwnerMemberID {
+			c.registry.BroadcastRecordingGate(c.roomCode, false)
+		}
 	}
 	c.registry.BroadcastLeave(c.roomCode, c.memberID)
 }
@@ -312,7 +327,9 @@ func (c *client) sendSessionError(err error) {
 	case errors.Is(err, domain.ErrNoActiveRoute):
 		c.sendError("no_active_route", "記録が開始されていません")
 	case errors.Is(err, domain.ErrRouteInUse):
-		c.sendError("route_in_use", "他のメンバーが記録中です")
+		c.sendError("route_in_use", "自分の記録はすでに開始されています")
+	case errors.Is(err, domain.ErrOwnerNotRecording):
+		c.sendError("owner_not_recording", "管理者が記録を開始するまでお待ちください")
 	case errors.Is(err, domain.ErrInvalidPoints):
 		c.sendError("invalid_points", "点の値が正しくありません")
 	case errors.Is(err, domain.ErrMemberBanned):

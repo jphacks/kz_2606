@@ -4,16 +4,16 @@ import (
 	"context"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
 
 var (
-	ErrRoomClosed    = domain.ErrRoomClosed
-	ErrNoActiveRoute = domain.ErrNoActiveRoute
-	ErrRouteInUse    = domain.ErrRouteInUse
-	ErrInvalidPoints = domain.ErrInvalidPoints
+	ErrRoomClosed        = domain.ErrRoomClosed
+	ErrNoActiveRoute     = domain.ErrNoActiveRoute
+	ErrRouteInUse        = domain.ErrRouteInUse
+	ErrOwnerNotRecording = domain.ErrOwnerNotRecording
+	ErrInvalidPoints     = domain.ErrInvalidPoints
 )
 
 const MaxPointsPerMessage = 500
@@ -52,10 +52,10 @@ func (s *SessionService) AppendPoints(ctx context.Context, code string, memberID
 	return s.sessions.AppendPoints(ctx, normalizedCode, memberID, points)
 }
 
-func (s *SessionService) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, time.Time, error) {
+func (s *SessionService) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
 	normalizedCode, err := domain.NormalizeRoomCode(code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	return s.sessions.StopRoute(ctx, normalizedCode, memberID)
 }
@@ -85,10 +85,10 @@ func (s *SessionService) UpdateMember(ctx context.Context, code string, memberID
 	return s.sessions.UpdateMember(ctx, normalizedCode, memberID, normalizedName, normalizedColor)
 }
 
-func (s *SessionService) Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, time.Time, bool, error) {
+func (s *SessionService) Leave(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
 	normalizedCode, err := domain.NormalizeRoomCode(code)
 	if err != nil {
-		return domain.Member{}, 0, time.Time{}, false, err
+		return domain.Room{}, domain.Member{}, nil, err
 	}
 	return s.sessions.Leave(ctx, normalizedCode, memberID)
 }

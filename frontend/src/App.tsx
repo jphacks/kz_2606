@@ -12,6 +12,7 @@ import {
   connectToRoom,
   flushIntervalMilliseconds,
   parsePointsEvent,
+  parseRecordingGateEvent,
   parseRoomMember,
   parseRoomSnapshot,
   parseRouteEndEvent,
@@ -417,6 +418,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           members: snapshot.members.map((member) => member.id === routeEnd.memberId
             ? { ...member, recording: false }
             : member),
+        }) : snapshot);
+      } else if (message.t === 'recording_gate') {
+        const enabled = parseRecordingGateEvent(message);
+        if (enabled === null) return;
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, recordingEnabled: enabled },
         }) : snapshot);
       } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
         otherTracksRef.current.delete(message.route);
@@ -964,7 +972,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         startLocationWatch(recordingBufferRef.current);
         void resumeActiveRoute(socket, room, startedRouteId);
       } else if (message.t === 'route_end' && 'route' in message && message.route === routeIdRef.current) {
-        completeRecordingStop(socket);
+        const endedRouteId = routeIdRef.current;
+        void persistPendingPoints(room, endedRouteId)
+          .catch((error: unknown) => {
+            console.error('管理者による記録終了前の未送信位置情報を保存できませんでした:', error);
+            setRecordingError('記録終了前の未送信位置情報を保存できませんでした。');
+          })
+          .finally(() => completeRecordingStop(socket));
       } else if (message.t === 'error') {
         const messageText = 'message' in message && typeof message.message === 'string'
           ? message.message
@@ -1249,6 +1263,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
                 roomClosed={Boolean(roomSnapshot?.room.closedAt)}
+                recordingEnabled={currentScreen === 'solo_record' || Boolean(roomSnapshot?.room.recordingEnabled)}
+                isOwner={currentScreen === 'solo_record' || roomSnapshot?.room.ownerMemberId === roomSnapshot?.you.id}
                 isMembersLoading={currentScreen === 'before_record' && (
                   !sessionLoaded || (Boolean(teamRoom?.code) && !roomSnapshot && !roomDataError)
                 )}

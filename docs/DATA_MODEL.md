@@ -138,10 +138,10 @@ CREATE TABLE IF NOT EXISTS routes (
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
 CREATE INDEX IF NOT EXISTS routes_member_started ON routes (member_id, started_at DESC);
 
--- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
--- 複数人が同時に start を叩いても2本目が作られない。
-CREATE UNIQUE INDEX IF NOT EXISTS routes_one_recording_per_room
-    ON routes (room_id) WHERE ended_at IS NULL;
+-- メンバーごとに記録中の route は1本まで。
+-- 管理者による開始待ち・全員停止はWebSocket/トランザクションで保証する。
+CREATE UNIQUE INDEX IF NOT EXISTS routes_one_recording_per_member
+    ON routes (room_id, member_id) WHERE ended_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS points (
     id          BIGSERIAL PRIMARY KEY,
@@ -334,7 +334,7 @@ GET /ws?room=KZ26AB
 
 | `t` | ペイロード | 備考 |
 |---|---|---|
-| `start` | — | 記録開始。サーバーが `routes` を1行作る |
+| `start` | — | 記録開始。サーバーが送信者の `routes` を1行作る。メンバーは owner の記録中だけ開始できる |
 | `points` | `{pts: Point[]}` | 1通あたり最大500点（64KB上限との兼ね合い） |
 | `stop` | — | 記録終了。`ended_at` を埋める |
 | `member` | `{displayName?, color?}` | 名前・色の変更 |
@@ -348,8 +348,10 @@ GET /ws?room=KZ26AB
 
 - `start` を送らずに `points` を送ったら `error / no_active_route`
 - 締められた部屋で `start` / `points` を送ったら `error / room_closed`
-- **すでに誰かが記録中の部屋で `start` を送ったら `error / route_in_use`。**
-  部屋の中で編集できる route は常に1本だけなので、前の人が `stop` するまで待つ
+- メンバーは自分の記録中 route がなければ、他メンバーの記録中・終了済み route に関係なく `start` できる。
+- owner が未開始の状態でメンバーが `start` を送ると `error / owner_not_recording`。
+- owner が `stop` すると、owner と全メンバーの記録中 route を同じトランザクションで終了し、`recording_gate: false` を全員へ配信する。
+- owner が再度 `start` するまで、メンバーは再開できない。
 
 ### Server → Client
 
@@ -359,6 +361,7 @@ GET /ws?room=KZ26AB
 | `route` | `{route: {id, member, color, startedAt}}` | 誰かが記録を開始した |
 | `points` | `{route, pts}` | 増分。**自分の点は返ってこない** |
 | `route_end` | `{route, member, endedAt}` | 誰かが記録を終了した |
+| `recording_gate` | `{enabled}` | owner の開始・停止。メンバーの開始可否 |
 | `member` | `{member}` | 参加 or 名前/色の変更 |
 | `leave` | `{member}` | 全接続が切れた（member単位） |
 | `closed` | `{closedAt, by}` | owner が締めた |
@@ -496,19 +499,19 @@ active ──ban──> banned ──unban──> active
 recording（ended_at IS NULL） ──stop──> ended
 ```
 
-**1つの部屋は route を何本でも持つ。ただし編集できるのは常に1本だけ。**
+**1つの部屋は route を何本でも持ち、各メンバーが自分の route を独立して記録する。**
 
 | | 本数 |
 |---|---|
 | 部屋が持つ route | 何本でも（記録のたびに1本増える） |
-| 記録中（`ended_at IS NULL`）の route | **部屋全体で1本まで** |
+| 記録中（`ended_at IS NULL`）の route | **メンバーごとに1本まで** |
 
-- 編集可 = 記録中の route。`points` が追記されるのはこの1本だけ
+- 編集可 = 記録中の route。`points` は送信者自身の route に追記される
 - 記録済みの route は**読み取り専用**。消すなら `DELETE .../routes/{routeId}`
-- 誰かが記録中のあいだ、他のメンバーは `start` できない（`error / route_in_use`）。
-  **`members[].recording` が `true` になるのも同時に1人まで**
-- DB側は `routes_one_recording_per_room` の部分ユニーク索引で保証する。
-  同時に `start` が飛んできても2本目は作られない
+- メンバーは他メンバーが記録中でも `start` できる。ただし owner が未記録なら
+  `error / owner_not_recording` になる。
+- DB側は `routes_one_recording_per_member` の部分ユニーク索引で、同一メンバーの二重開始だけを防ぐ。
+- owner の `stop` は全員の active route を終了するため、メンバー端末も `route_end` を受信して記録を終了する。
 
 > **`leave` の時点で開いている route を自動で閉じること。**
 > これを忘れると `ended_at` が永久にNULLの route が溜まり、
@@ -527,7 +530,7 @@ recording（ended_at IS NULL） ──stop──> ended
 ```text
 Postgres
  ├ rooms / members / routes / points   永続データと記録状態
- └ routes_one_recording_per_room       部屋内の記録中routeを1本に制限
+ └ routes_one_recording_per_member     メンバーごとの記録中routeを1本に制限
 
 Registry                              interface/ws
  └ conns map[roomCode]map[*client]struct{}  接続と複数タブの管理のみ
@@ -541,11 +544,12 @@ client
 
 ### 操作と不変条件
 
-1. `start` / `points` / `stop` は同じ部屋行の `FOR UPDATE` ロックを取る。記録開始時に部屋内のactive routeを調べ、二重開始は `route_in_use` で拒否する。部分ユニーク索引も最後の防衛線として維持する。
+1. `start` / `points` / `stop` は同じ部屋行の `FOR UPDATE` ロックを取る。member の `start` は owner の active route を確認し、同一 member の二重開始は `route_in_use` で拒否する。部分ユニーク索引も最後の防衛線として維持する。
 2. `points` は現在のmemberのactive routeにだけ追加する。routeが無ければ `no_active_route` を返す。
 3. 点列は1メッセージ500点以下。1回のバッチ保存が成功した後に限り、送信者以外へ `points` を配信する。送信者は自分の線をローカルで描画する。
 4. 同一 `memberID` の接続が複数ありうる（複数タブ）。最後の接続が切れた時だけ `leave` を通知し、記録中routeがあれば終了する。この後処理は他接続への配信をブロックしないよう非同期で行う。
 5. `snapshot` はDBから読み込む。インメモリのroute/point複製や定期flushとの整合性管理は行わない。
+6. snapshot の `room.recordingEnabled` は owner の active route の有無を表す。owner の開始・停止は `recording_gate` イベントでも通知する。
 
 ---
 

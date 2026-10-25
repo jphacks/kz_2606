@@ -69,6 +69,8 @@ export function parseRoomSnapshot(value: unknown): ParsedRoomSnapshot | null {
     !isRecord(value.room) ||
     typeof value.room.code !== 'string' ||
     typeof value.room.title !== 'string' ||
+    typeof value.room.ownerMemberId !== 'number' ||
+    typeof value.room.recordingEnabled !== 'boolean' ||
     (value.room.closedAt !== null && typeof value.room.closedAt !== 'string') ||
     !isRecord(value.you) ||
     typeof value.you.id !== 'number' ||
@@ -116,13 +118,26 @@ export function parseRoomSnapshot(value: unknown): ParsedRoomSnapshot | null {
 
   return {
     snapshot: {
-      room: { code: value.room.code, title: value.room.title, closedAt: value.room.closedAt },
+      room: {
+        code: value.room.code,
+        title: value.room.title,
+        closedAt: value.room.closedAt,
+        ownerMemberId: value.room.ownerMemberId,
+        recordingEnabled: value.room.recordingEnabled,
+      },
       you: { id: value.you.id },
       members: members.filter((member): member is RoomMember => member !== null),
       routes,
     },
     routePoints,
   };
+}
+
+export function parseRecordingGateEvent(value: unknown): boolean | null {
+  if (!isRecord(value) || value.t !== 'recording_gate' || typeof value.enabled !== 'boolean') {
+    return null;
+  }
+  return value.enabled;
 }
 
 export function parseRouteStartedEvent(value: unknown): RouteStartedEvent | null {

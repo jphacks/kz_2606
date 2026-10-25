@@ -31,8 +31,8 @@ func (s *testRecordingSession) AppendPoints(_ context.Context, _ string, _ int64
 	return s.route.ID, s.member, nil
 }
 
-func (s *testRecordingSession) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, time.Time, error) {
-	return domain.Room{Code: "ROOM01"}, s.member, s.route.ID, time.UnixMilli(1761278403000).UTC(), nil
+func (s *testRecordingSession) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
+	return domain.Room{Code: "ROOM01"}, s.member, []domain.RouteEnd{{ID: s.route.ID, MemberID: s.route.MemberID, EndedAt: time.UnixMilli(1761278403000).UTC()}}, nil
 }
 
 func (s *testRecordingSession) UpdateMember(_ context.Context, _ string, _ int64, name, color *string) (domain.Member, bool, error) {
@@ -45,8 +45,8 @@ func (s *testRecordingSession) UpdateMember(_ context.Context, _ string, _ int64
 	return s.member, false, nil
 }
 
-func (s *testRecordingSession) Leave(context.Context, string, int64) (domain.Member, int64, time.Time, bool, error) {
-	return s.member, s.route.ID, time.UnixMilli(1761278403000).UTC(), true, nil
+func (s *testRecordingSession) Leave(context.Context, string, int64) (domain.Room, domain.Member, []domain.RouteEnd, error) {
+	return domain.Room{Code: "ROOM01"}, s.member, []domain.RouteEnd{{ID: s.route.ID, MemberID: s.route.MemberID, EndedAt: time.UnixMilli(1761278403000).UTC()}}, nil
 }
 
 func TestClientRecordingOperationsBroadcastEvents(t *testing.T) {

@@ -127,6 +127,13 @@ func (r *Registry) BroadcastRouteEnd(roomCode string, routeID, memberID int64, e
 	}{Type: "route_end", Route: routeID, Member: memberID, EndedAt: endedAt})
 }
 
+func (r *Registry) BroadcastRecordingGate(roomCode string, enabled bool) {
+	r.broadcastEvent(roomCode, 0, struct {
+		Type    string `json:"t"`
+		Enabled bool   `json:"enabled"`
+	}{Type: "recording_gate", Enabled: enabled})
+}
+
 func (r *Registry) BroadcastLeave(roomCode string, memberID int64) {
 	r.broadcastEvent(roomCode, memberID, struct {
 		Type   string `json:"t"`

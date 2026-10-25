@@ -64,7 +64,9 @@ export interface RoomRouteStats {
 }
 
 export interface RoomSnapshot {
-  room: Pick<Room, 'code' | 'title' | 'closedAt'>;
+  room: Pick<Room, 'code' | 'title' | 'closedAt' | 'ownerMemberId'> & {
+    recordingEnabled: boolean;
+  };
   you: Pick<RoomMember, 'id'>;
   members: RoomMember[];
   routes: RoomRouteStats[];

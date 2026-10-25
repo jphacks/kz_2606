@@ -11,12 +11,13 @@ import (
 type pointTuple [4]any
 
 type roomDTO struct {
-	ID            int64      `json:"id"`
-	Code          string     `json:"code"`
-	Title         string     `json:"title"`
-	OwnerMemberID int64      `json:"ownerMemberId"`
-	IsPrivate     bool       `json:"isPrivate"`
-	ClosedAt      *time.Time `json:"closedAt"`
+	ID               int64      `json:"id"`
+	Code             string     `json:"code"`
+	Title            string     `json:"title"`
+	OwnerMemberID    int64      `json:"ownerMemberId"`
+	IsPrivate        bool       `json:"isPrivate"`
+	ClosedAt         *time.Time `json:"closedAt"`
+	RecordingEnabled bool       `json:"recordingEnabled"`
 }
 
 type youDTO struct {
@@ -70,6 +71,7 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 			recordingByMember[route.MemberID] = true
 		}
 	}
+	recordingEnabled := recordingByMember[snapshot.Room.OwnerMemberID]
 
 	members := make([]memberDTO, 0, len(snapshot.Members))
 	for _, member := range snapshot.Members {
@@ -107,12 +109,13 @@ func makeSnapshotDTO(snapshot domain.RoomSnapshot, you domain.Member, registry *
 	return snapshotDTO{
 		Type: "snapshot",
 		Room: roomDTO{
-			ID:            snapshot.Room.ID,
-			Code:          snapshot.Room.Code,
-			Title:         snapshot.Room.Title,
-			OwnerMemberID: snapshot.Room.OwnerMemberID,
-			IsPrivate:     snapshot.Room.IsPrivate,
-			ClosedAt:      snapshot.Room.ClosedAt,
+			ID:               snapshot.Room.ID,
+			Code:             snapshot.Room.Code,
+			Title:            snapshot.Room.Title,
+			OwnerMemberID:    snapshot.Room.OwnerMemberID,
+			IsPrivate:        snapshot.Room.IsPrivate,
+			ClosedAt:         snapshot.Room.ClosedAt,
+			RecordingEnabled: recordingEnabled,
 		},
 		You: youDTO{
 			ID:          you.ID,
