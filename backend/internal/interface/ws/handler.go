@@ -23,11 +23,12 @@ type Handler struct {
 	auth     *usecase.AuthService
 	rooms    roomSnapshotter
 	registry *Registry
+	sessions recordingSession
 	upgrader websocket.Upgrader
 }
 
-func NewHandler(authService *usecase.AuthService, rooms roomSnapshotter, registry *Registry) *Handler {
-	return &Handler{
+func NewHandler(authService *usecase.AuthService, rooms roomSnapshotter, registry *Registry, sessions ...recordingSession) *Handler {
+	handler := &Handler{
 		auth:     authService,
 		rooms:    rooms,
 		registry: registry,
@@ -36,6 +37,10 @@ func NewHandler(authService *usecase.AuthService, rooms roomSnapshotter, registr
 			WriteBufferSize: 4096,
 		},
 	}
+	if len(sessions) > 0 {
+		handler.sessions = sessions[0]
+	}
+	return handler
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -80,9 +85,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		done:       make(chan struct{}),
 		closeAfter: make(chan struct{}),
 		registry:   h.registry,
+		sessions:   h.sessions,
 		roomCode:   snapshot.Room.Code,
 		memberID:   you.ID,
 	}
+	connection.onLeave = connection.handleLeave
 	h.registry.Add(connection)
 	payload, err := json.Marshal(makeSnapshotDTO(snapshot, you, h.registry, time.Now()))
 	if err != nil {
