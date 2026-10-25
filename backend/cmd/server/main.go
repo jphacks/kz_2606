@@ -54,6 +54,7 @@ func run() error {
 		sessionCodec,
 	)
 	roomService := usecase.NewRoomService(persistence.NewRoomRepository(pool))
+	sessionService := usecase.NewSessionService(persistence.NewSessionRepository(pool))
 	wsRegistry := ws.NewRegistry()
 	mux := rest.NewRouter(
 		authService,
@@ -64,7 +65,7 @@ func run() error {
 		},
 		wsRegistry,
 	)
-	mux.Handle("/ws", ws.NewHandler(authService, roomService, wsRegistry))
+	mux.Handle("/ws", ws.NewHandler(authService, roomService, wsRegistry, sessionService))
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

@@ -166,8 +166,8 @@ func TestHandlerAuthenticatesRoomMemberAndSendsSnapshot(t *testing.T) {
 	if err := conn.ReadJSON(&unsupported); err != nil {
 		t.Fatal(err)
 	}
-	if unsupported.Type != "error" || unsupported.Code != "not_implemented" {
-		t.Fatalf("unimplemented operation response = %+v", unsupported)
+	if unsupported.Type != "error" || unsupported.Code != "service_unavailable" {
+		t.Fatalf("operation without recording service response = %+v", unsupported)
 	}
 }
 
