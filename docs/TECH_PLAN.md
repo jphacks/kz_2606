@@ -159,39 +159,60 @@ GPSアートは**生データのままだと汚い**。ここが一番効く。
 | 役割 | 採用 | 理由 |
 |---|---|---|
 | ビルド | Vite + React 19 + TypeScript | 確定 |
-| 地図 | **Leaflet 1.9 を生で使う** | react-leaflet は使わない（7.2参照） |
-| タイル | **CARTO dark_matter** | 暗い地図＋蛍光色の線が一番映える |
-| 状態管理 | zustand | 3KB。Redux不要 |
+| 地図 | Leaflet 1.9 + react-leaflet 5。**ただし軌跡は生の Leaflet で描く** | 地図の器・タイル・マーカーは react-leaflet に任せ、**点列だけは React を通さない**（7.2参照） |
+| タイル | OpenStreetMap 標準 | 当初は CARTO dark_matter（暗い地図＋蛍光色の線が映える）を想定していたが、**昼間のデモなら標準タイルでも線は見える**ので変えていない。ただし**メンバーの色は暗い背景前提で選んだ色**（先頭は `#0e7861`）なので、明るい背景で沈むようなら線の色か太さを調整する |
+| 状態管理 | React の `useState` / `useRef` | `zustand` は依存に入れてあるが**使っていない**。画面数が少なく `App.tsx` で足りている。**点列は状態に載せない**（7.2・DATA_MODEL 9章） |
 | スタイル | Tailwind CSS v4 | Viteプラグイン1行。モバイルUIを速く作れる |
-| 間引き | simplify-js | Douglas-Peucker、2KB |
+| 間引き | **自前実装**（`lib/geo.ts` の `simplifyTrackSegment`） | Douglas-Peucker。simplify-js は入れていない（依存を増やさず、度→メートルの換算を自分で握るため）。確定したセグメントだけ間引く |
 | 永続バッファ | idb-keyval | IndexedDBラッパ、600B |
 | QR | qrcode | 部屋コードの共有用。読み取りはOS標準カメラでOK |
 
 ```bash
 npm create vite@latest web -- --template react-ts
-npm i leaflet zustand simplify-js idb-keyval qrcode
+npm i leaflet zustand idb-keyval qrcode
 npm i -D @types/leaflet tailwindcss @tailwindcss/vite
 ```
 
-### 7.2 react-leaflet を使わない理由
+### 7.2 軌跡だけは React を通さずに描く
 
-毎秒ポリラインの頂点が増える構造なので、再レンダリングでpropsを流し込む形はすぐ重くなる。
-**地図インスタンスを1個 ref で持って、`Map<memberId, L.Polyline>` を命令的に `addLatLng()` する**ほうが速いし短い。
-Reactは地図の「外側」のUI（ボタン・色選択・メンバー一覧）だけ担当させる。
+毎秒ポリラインの頂点が増える構造なので、**点列を props や状態で流し込む形はすぐ重くなる**。
+当初は react-leaflet を一切使わない方針だったが、実装では**器だけ react-leaflet に任せ、
+点列は React を通さない**という形に落ち着いた。守っているのは「点列を再レンダリングに乗せない」
+という元の理由そのもので、そこは変えていない。
+
+| 担当 | 何を |
+|---|---|
+| react-leaflet | `MapContainer` / `TileLayer` / 現在地の `Marker` / 地図の中心移動 |
+| 生の Leaflet | **軌跡のポリライン**。`L.layerGroup()` に `L.polyline()` を足して `addLatLng()` で伸ばす |
+| React の状態 | 地図の「外側」のUI（ボタン・色選択・メンバー一覧）と、1秒ごとの距離・時間の表示だけ |
+
+点列は `lib/track_buffer.ts` の `TrackBuffer` が持ち、`ui/map.tsx` の `TrackLayer` が
+`subscribe()` で増分だけ受け取って Leaflet のレイヤを直接伸ばす。
+**`TrackBuffer` のインスタンスは route 単位**で、`otherTracks` の state が持つのは
+バッファへの参照だけ（点そのものは入らない）。
 
 ```ts
-// useTracks.ts のイメージ
-const lines = useRef(new Map<string, L.Polyline>());
+// ui/map.tsx の TrackLayer（実装の抜粋）
+const group = L.layerGroup().addTo(map);
+const polylines: L.Polyline[] = [];
 
-function append(memberId: string, pts: L.LatLng[], color: string) {
-  let line = lines.current.get(memberId);
-  if (!line) {
-    line = L.polyline([], { color, weight: 5, smoothFactor: 1.5 }).addTo(map);
-    lines.current.set(memberId, line);
+// 既にある点列はまとめて入れる（setLatLngs 相当）
+for (const segment of buffer.snapshot()) appendSegment([...segment]);
+
+// 増分は addLatLng で伸ばす
+buffer.subscribe((update) => {
+  if (update.type === 'replace') {
+    polylines[update.segmentIndex]?.setLatLngs(update.coordinates);   // 確定時の間引き差し替え
+    return;
   }
-  pts.forEach(p => line!.addLatLng(p));
-}
+  if (update.startedNewSegment) appendSegment([update.coordinate]);
+  else polylines[update.segmentIndex].addLatLng(update.coordinate);
+});
 ```
+
+- 1本のポリラインは `SEGMENT_MAX_POINTS`（1,000点）で切り、確定したセグメントだけ間引く
+- 色は `members[]` を正とし、変更時はレイヤを作り直さず `setStyle()` だけ当てる
+- 連動する定数は DATA_MODEL.md 11章の表を参照
 
 ### 7.3 バックエンド（Go）
 

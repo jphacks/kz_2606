@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS members (
     UNIQUE (room_id, user_id)             -- 1部屋1ユーザー1行
 );
 
+CREATE INDEX IF NOT EXISTS members_user ON members (user_id);
+
 CREATE TABLE IF NOT EXISTS routes (
     id         BIGSERIAL PRIMARY KEY,
     room_id    BIGINT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
@@ -134,6 +136,7 @@ CREATE TABLE IF NOT EXISTS routes (
 );
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
+CREATE INDEX IF NOT EXISTS routes_member_started ON routes (member_id, started_at DESC);
 
 -- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
 -- 複数人が同時に start を叩いても2本目が作られない。
@@ -235,6 +238,40 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 - 鍵は `SESSION_SECRET`（env）。**サーバー再起動でログアウトしない**のが開発中に効く
 - 失効の即時無効化はできない。ハッカソンでは割り切る
 
+### 活動履歴
+
+```
+GET /api/activities
+```
+
+ログイン中のユーザー本人が記録した route を、新しい順で返す。集計単位は部屋ではなく
+**route（1回の記録）**。固定のモック値やクライアント内だけの値を履歴表示に使わず、
+Postgres の route・point を正とする。
+
+```json
+{
+  "summary": {
+    "recordings": 1, "completed": 1,
+    "meters": 842.5, "elapsedMs": 600000
+  },
+  "activities": [{
+    "routeId": 12,
+    "roomCode": "KZ26AB", "roomTitle": "大通公園に絵を描く",
+    "isPrivate": false, "memberCount": 3,
+    "startedAt": "2026-10-24T05:00:00Z",
+    "endedAt": "2026-10-24T05:10:00Z",
+    "meters": 842.5, "elapsedMs": 600000
+  }]
+}
+```
+
+- `recordings` は本人の route 数、`completed` はそのうち `ended_at` が入った route 数
+- `summary.meters` / `summary.elapsedMs` は本人の各 route の合計
+- 各項目の距離・時間は6章の `routes[].meters` / `elapsedMs` と同じ算出規則
+- `memberCount` はその部屋のBANされていない現在のメンバー数
+- 記録中の route も含む。その `elapsedMs` はレスポンス生成時点までの値
+- 未ログインは `401 unauthorized`
+
 ### 部屋
 
 | メソッド・パス | リクエスト | 成功 | エラー |
@@ -250,7 +287,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 ```
 
 - `POST /api/rooms` は**レスポンスに `code` を含める**。作成者は即QRを出す必要がある
-- 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭）
+- 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭 `#0e7861`）
 - 個人ルームは `isPrivate: true`。本人以外のjoinおよびWS接続を拒否する
 - `GET /api/rooms/{code}` は存在確認だけ。**軌跡は返さない**（それは `snapshot` の仕事）
 - `POST .../join` は**冪等**。すでに参加済みなら既存の member を返す
@@ -342,16 +379,16 @@ GET /ws?room=KZ26AB
   },
   "you": { "id": 3, "displayName": "たろう", "color": "#ff2d78", "isOwner": false },
   "members": [
-    { "id": 1, "displayName": "はなこ", "color": "#00e5ff", "online": true,  "banned": false, "recording": true  },
+    { "id": 1, "displayName": "はなこ", "color": "#0e7861", "online": true,  "banned": false, "recording": true  },
     { "id": 3, "displayName": "たろう", "color": "#ff2d78", "online": true,  "banned": false, "recording": false },
     { "id": 5, "displayName": "じろう", "color": "#ffe600", "online": false, "banned": true,  "recording": false }
   ],
   "routes": [
-    { "id": 12, "member": 1, "color": "#00e5ff",
+    { "id": 12, "member": 1, "color": "#0e7861",
       "startedAt": "2026-10-24T05:00:00Z", "endedAt": "2026-10-24T05:10:00Z",
       "meters": 842.5, "elapsedMs": 600000,
       "pts": [[43.0607,141.3544,1761278400000,8.2]] },
-    { "id": 14, "member": 1, "color": "#00e5ff",
+    { "id": 14, "member": 1, "color": "#0e7861",
       "startedAt": "2026-10-24T05:30:00Z", "endedAt": null,
       "meters": 0, "elapsedMs": 1800000,
       "pts": [] }
@@ -577,6 +614,10 @@ Map<routeId, {
 
 再接続時に500点ずつ送り直し、途中で失敗したら残りを書き戻す。
 
+再接続snapshotに同じmemberの記録中routeがあればそのrouteを再開する。
+routeが無い場合は切断中にサーバー側で終了済みなので、新しいrouteを開始する。
+古いrouteのoutboxはroute IDが一致しないため新しいrouteへは送らず、容量上限まで保持する。
+
 > **再送中は直送を止める。** `outbox` の吐き出しは非同期なので、その隙間に
 > 新しい点を直送すると**時刻が逆行した点列**が他クライアントに届く。
 > `draining` フラグを立てて、吐き出し中は必ず `outbox` に積む。
@@ -590,9 +631,10 @@ Map<routeId, {
 | `MAX_ACCURACY_M` | 30 | `frontend/src/lib/geo.ts` | — |
 | `MIN_DISTANCE_M` | 5 | 同 | **点の総数を直接決める。** 1mにすると5倍 |
 | `MAX_SPEED_MPS` | 14 | 同 | — |
-| `GAP_MS` | 30,000 | 同 | `useTracks` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
+| `GAP_MS` | 30,000 | 同 | `TrackBuffer` のセグメント分割、距離計算の除外。**`domain.GapMillis` と同値に保つ** |
 | `GapMillis` | 30,000 | `backend/internal/domain/distance.go` | `snapshot.routes[].meters` の算出。**`GAP_MS` と連動** |
-| `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/hooks/useTracks.ts` | 描画性能 |
+| `SEGMENT_MAX_POINTS` | 1,000 | `frontend/src/lib/track_buffer.ts`（`maxTrackSegmentPoints`） | 描画性能。1本の Leaflet ポリラインの上限。超えたら確定して次のセグメントへ |
+| 間引きの許容値 | 5m | `frontend/src/lib/geo.ts`（`trackSimplificationToleranceMeters`） | **`MIN_DISTANCE_M` と同値に保つ。** これを採否より大きくすると、わざわざ残した点を描画で落とすことになる |
 | `FLUSH_MS` | 3,000 | `frontend/src/hooks/useRecorder.ts` | 送信頻度 = `stats` の更新頻度 |
 | `CHUNK` | 500 | `frontend/src/lib/ws.ts` | **`maxMessageSize` 64KB を超えない上限** |
 | `MAX`（outbox） | 20,000 | `frontend/src/lib/outbox.ts` | — |

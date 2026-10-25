@@ -92,6 +92,7 @@ export function parseRoomSnapshot(value: unknown): ParsedRoomSnapshot | null {
       typeof route.member !== 'number' ||
       typeof route.color !== 'string' ||
       typeof route.startedAt !== 'string' ||
+      !('endedAt' in route) ||
       (route.endedAt !== null && typeof route.endedAt !== 'string') ||
       typeof route.meters !== 'number' ||
       typeof route.elapsedMs !== 'number' ||

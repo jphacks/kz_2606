@@ -41,7 +41,7 @@ export type ServerMsg = ... // snapshot | route | points | route_end | member | 
 
 ## F1 の手順
 
-1. `useLeafletMap` — 地図を1個だけ作って ref で持つ。CARTO `dark_all`、**`preferCanvas: true`**
+1. `useLeafletMap` — 地図を1個だけ作って ref で持つ。タイルは OpenStreetMap 標準、**`preferCanvas: true`**
 2. `useTracks` — **`Map<routeId, {...}>`**。route 1本 = ポリラインの束
 3. **3段階でセグメントを分ける**
    - route が変わったら新しいレイヤグループ
@@ -85,7 +85,9 @@ export type ServerMsg = ... // snapshot | route | points | route_end | member | 
 
 - **点列をReactの状態（zustand/useState）に入れない。** 毎秒再レンダリングになります。
   `useRef` + 命令的に `addLatLng`
-- **react-leaflet を入れない。** 同じ理由
+- **react-leaflet に軌跡を描かせない。** 同じ理由。器（`MapContainer` / `TileLayer` /
+  `Marker`）は react-leaflet でよいが、**ポリラインは生の Leaflet に `addLatLng()` させる**
+  （TECH_PLAN 7.2）
 - **`PointFilter` を飛ばさない。** 生データのまま描くと団子とヒゲだらけになります
 - **自分の点はサーバーから返ってこない。** 送信前にローカルで描く（待つと体感が重い）
 - **再送中は直送を止める。** `outbox` の吐き出しは非同期なので、その隙間に新しい点を直送すると

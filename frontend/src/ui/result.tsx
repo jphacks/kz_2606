@@ -1,46 +1,99 @@
-import { 
-  ChevronLeft, 
-  ChevronDown, 
-  Footprints, 
-  Image as ImageIcon, 
-  Waypoints, 
-  Clock, 
-  CheckCircle2, 
-  ArrowRight, 
-  ChevronRight, 
-  Users, 
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Footprints,
+  History,
   Home,
-  Heart,
-  Circle
+  Image as ImageIcon,
+  Lock,
+  RefreshCw,
+  Users,
+  Waypoints,
 } from 'lucide-react';
+import type { ActivityHistory, ActivityRecord } from '../lib/types';
 
 interface ActivityProps {
   username?: string;
-  roomName?: string;
+  history: ActivityHistory | null;
+  isLoading?: boolean;
+  error?: string;
   isRecording?: boolean;
   isConnecting?: boolean;
+  onRetry?: () => void;
   onBackToHome?: () => void;
+}
+
+function formatDistance(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`;
+}
+
+function formatElapsed(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}時間${minutes}分`;
+  if (minutes > 0) return `${minutes}分${seconds}秒`;
+  return `${seconds}秒`;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat('ja-JP', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function ActivityDetails({ activity }: { activity: ActivityRecord }) {
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs text-gray-500">{formatDate(activity.startedAt)}</span>
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+          activity.endedAt ? 'text-[#0e7861] bg-[#EBF5F3]' : 'text-amber-700 bg-amber-50'
+        }`}>
+          {activity.endedAt ? '完了' : '記録中'}
+        </span>
+        {activity.isPrivate && <Lock size={12} className="text-gray-400" aria-label="個人ルーム" />}
+      </div>
+      <h4 className="font-bold text-gray-900 text-sm truncate mb-1">{activity.roomTitle}</h4>
+      <p className="text-xs text-gray-500 truncate">
+        {formatDistance(activity.meters)}・{formatElapsed(activity.elapsedMs)}・{activity.memberCount}人
+      </p>
+    </>
+  );
 }
 
 export default function Activity({
   username,
-  roomName,
+  history,
+  isLoading = false,
+  error = '',
   isRecording = false,
   isConnecting = false,
+  onRetry,
   onBackToHome,
 }: ActivityProps) {
   const displayUsername = username?.trim() || null;
-  const displayRoomName = roomName?.trim() || 'チーム名未設定';
+  const summary = history?.summary;
+  const latest = history?.activities[0];
 
   return (
-    <div 
+    <div
       className="min-h-screen bg-[#F5F5F5] font-sans text-gray-800 relative flex flex-col"
       style={{ colorScheme: 'light' }}
     >
-      {/* --- ヘッダー --- */}
       <header className="flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] bg-white sticky top-0 z-10 shadow-sm">
-        <button className="p-2 -ml-2 text-gray-700 hover:bg-gray-100 rounded-full transition" aria-label="戻る">
-          <ChevronLeft size={24} />
+        <button
+          onClick={onBackToHome}
+          className="p-2 -ml-2 text-gray-700 hover:bg-gray-100 rounded-full transition"
+          aria-label="ホームに戻る"
+        >
+          <ArrowLeft size={24} />
         </button>
         <div className="flex-1 ml-2">
           <h1 className="text-lg font-bold text-gray-900 leading-tight">これまでの活動</h1>
@@ -56,45 +109,43 @@ export default function Activity({
       {(isRecording || isConnecting) && (
         <div role="status" className="flex items-center gap-2 bg-emerald-50 px-5 py-2 text-xs font-bold text-emerald-800">
           <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
-          {isConnecting ? '記録を接続中です' : '記録中です。画面を見ている間も位置情報を記録しています'}
+          {isConnecting ? '記録を接続中です' : '記録中です。最新値は再読み込みすると反映されます'}
         </div>
       )}
 
-      {/* --- サマリーセクション --- */}
-      <main className="px-5 pt-6 pb-8">
-        <div className="flex justify-between items-end mb-4">
-          <div>
-            <h2 className="text-2xl font-extrabold text-gray-900 mb-1">一歩ずつ、思い出に。</h2>
-            <p className="text-xs text-gray-500">みんなと歩いて、描いてきた記録です。</p>
-          </div>
-          <button className="flex items-center gap-1 bg-white border border-gray-200 px-3 py-1.5 rounded-full text-sm font-medium text-gray-700 shadow-sm">
-            全期間
-            <ChevronDown size={16} className="text-gray-500" />
-          </button>
+      <main className="px-5 pt-6 pb-8" aria-busy={isLoading}>
+        <div className="mb-4">
+          <h2 className="text-2xl font-extrabold text-gray-900 mb-1">一歩ずつ、思い出に。</h2>
+          <p className="text-xs text-gray-500">保存されたGPS記録を集計しています。</p>
         </div>
 
-        {/* 4つの統計パネル */}
-        <div className="grid grid-cols-2 gap-3 mb-3">
+        {error && (
+          <div role="alert" className="mb-4 rounded-2xl border border-red-100 bg-red-50 p-4 text-sm text-red-700">
+            <p>{error}</p>
+            {onRetry && username && (
+              <button onClick={onRetry} className="mt-3 flex items-center gap-1 font-bold text-red-800">
+                <RefreshCw size={14} />
+                再読み込み
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 mb-3" aria-live="polite">
           <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
             <div className="flex items-center gap-2 text-gray-500 mb-2">
-              <Footprints size={16} className="text-[#0e7861]" />
-              <span className="text-xs font-bold">参加した回数</span>
+              <History size={16} className="text-[#0e7861]" />
+              <span className="text-xs font-bold">記録した回数</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-gray-900">3</span>
-              <span className="text-sm text-gray-600 font-medium">回</span>
-            </div>
+            <div className="text-2xl font-bold text-gray-900">{isLoading ? '—' : `${summary?.recordings ?? 0}回`}</div>
           </div>
-          
+
           <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
             <div className="flex items-center gap-2 text-gray-500 mb-2">
               <ImageIcon size={16} className="text-[#0e7861]" />
-              <span className="text-xs font-bold">完成したアート</span>
+              <span className="text-xs font-bold">完了した記録</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-gray-900">3</span>
-              <span className="text-sm text-gray-600 font-medium">作品</span>
-            </div>
+            <div className="text-2xl font-bold text-gray-900">{isLoading ? '—' : `${summary?.completed ?? 0}件`}</div>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
@@ -102,10 +153,7 @@ export default function Activity({
               <Waypoints size={16} className="text-[#0e7861]" />
               <span className="text-xs font-bold">歩いた距離</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-gray-900">4.80</span>
-              <span className="text-sm text-gray-600 font-medium">km</span>
-            </div>
+            <div className="text-2xl font-bold text-gray-900">{isLoading ? '—' : formatDistance(summary?.meters ?? 0)}</div>
           </div>
 
           <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
@@ -113,108 +161,56 @@ export default function Activity({
               <Clock size={16} className="text-[#0e7861]" />
               <span className="text-xs font-bold">活動時間</span>
             </div>
-            <div className="flex items-baseline gap-1">
-              <span className="text-3xl font-bold text-gray-900">2</span>
-              <span className="text-xs text-gray-600 font-medium">時間 24分</span>
-            </div>
+            <div className="text-2xl font-bold text-gray-900">{isLoading ? '—' : formatElapsed(summary?.elapsedMs ?? 0)}</div>
           </div>
         </div>
-        <p className="text-[10px] text-gray-400 mb-8">距離と時間は、あなた自身の記録の合計です。</p>
+        <p className="text-[10px] text-gray-400 mb-8">距離と時間は、あなた自身のrouteの合計です。</p>
 
-        {/* 最近完成したアート */}
-        <h3 className="text-lg font-bold text-gray-900 mb-4">最近完成したアート</h3>
-        <div className="bg-white rounded-3xl overflow-hidden shadow-sm border border-gray-100">
-          <div className="relative h-40 bg-gray-100">
-            <img 
-              src="/hero-map.png" 
-              alt="吉祥寺にハートを描こう" 
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute top-3 left-3 bg-white/95 text-[#0e7861] px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm backdrop-blur-sm">
-              <CheckCircle2 size={16} />
-              4人で完成！
+        {latest && (
+          <>
+            <h3 className="text-lg font-bold text-gray-900 mb-4">最新の記録</h3>
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 mb-8">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
+                  <CheckCircle2 size={24} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <ActivityDetails activity={latest} />
+                </div>
+              </div>
             </div>
-          </div>
-          <div className="p-5">
-            <p className="text-xs text-gray-500 mb-1">{displayRoomName}・2026.10.24</p>
-            <h4 className="text-xl font-bold text-gray-900 mb-3">吉祥寺にハートを描こう</h4>
-            <div className="flex justify-between items-center text-sm font-medium mb-4">
-              <span className="text-gray-600">みんなの距離 <span className="text-gray-900">6.00 km</span></span>
-              <span className="text-gray-600">経過時間 <span className="text-gray-900">48:32</span></span>
-            </div>
-            <hr className="border-gray-100 mb-4" />
-            <button className="w-full flex justify-between items-center text-[#0e7861] font-bold text-sm">
-              完成アートと結果を見る
-              <ArrowRight size={18} />
-            </button>
-          </div>
-        </div>
+          </>
+        )}
       </main>
 
-      {/* --- 活動履歴リスト --- */}
       <section className="bg-white flex-1 px-5 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] rounded-t-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.03)]">
         <div className="flex justify-between items-end mb-6">
-          <div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">活動履歴</h3>
-            <div className="flex items-center gap-1 text-[#0e7861] text-xs font-bold bg-[#EBF5F3] px-2 py-1 rounded-md inline-flex">
-              <Users size={14} />
-              {displayRoomName}
-            </div>
-          </div>
-          <span className="text-xs text-gray-500">全3件・新しい順</span>
+          <h3 className="text-lg font-bold text-gray-900">活動履歴</h3>
+          <span className="text-xs text-gray-500">
+            {isLoading ? '読み込み中' : `${history?.activities.length ?? 0}件・新しい順`}
+          </span>
         </div>
+
+        {!isLoading && !error && history?.activities.length === 0 && (
+          <div className="rounded-2xl bg-gray-50 px-4 py-8 text-center text-sm text-gray-500 mb-8">
+            <Footprints size={28} className="mx-auto mb-2 text-gray-400" />
+            まだ記録がありません。最初のGPSアートを始めましょう。
+          </div>
+        )}
 
         <div className="space-y-4 mb-8">
-          {/* 履歴アイテム 1 */}
-          <button className="w-full flex items-center gap-4 text-left active:opacity-70 transition">
-            <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
-              <Heart size={24} />
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs text-gray-500">2026.10.24</span>
-                <span className="text-[10px] font-bold text-[#0e7861] bg-[#EBF5F3] px-1.5 py-0.5 rounded">完成</span>
+          {history?.activities.map((activity) => (
+            <div key={activity.routeId} className="w-full flex items-center gap-4 text-left">
+              <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
+                {activity.memberCount > 1 ? <Users size={23} /> : <Footprints size={23} />}
               </div>
-              <h4 className="font-bold text-gray-900 text-sm truncate mb-1">吉祥寺にハートを描こう</h4>
-              <p className="text-xs text-gray-500 truncate">あなた 1.60 km・48分32秒・4人</p>
-            </div>
-            <ChevronRight size={20} className="text-gray-400 shrink-0" />
-          </button>
-
-          {/* 履歴アイテム 2 */}
-          <button className="w-full flex items-center gap-4 text-left active:opacity-70 transition">
-            <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
-              <Circle size={24} />
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs text-gray-500">2026.10.17</span>
-                <span className="text-[10px] font-bold text-[#0e7861] bg-[#EBF5F3] px-1.5 py-0.5 rounded">完成</span>
+              <div className="flex-1 overflow-hidden">
+                <ActivityDetails activity={activity} />
               </div>
-              <h4 className="font-bold text-gray-900 text-sm truncate mb-1">井の頭公園に輪を描こう</h4>
-              <p className="text-xs text-gray-500 truncate">あなた 1.85 km・45分10秒・4人</p>
             </div>
-            <ChevronRight size={20} className="text-gray-400 shrink-0" />
-          </button>
-
-          {/* 履歴アイテム 3 */}
-          <button className="w-full flex items-center gap-4 text-left active:opacity-70 transition">
-            <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
-              <Heart size={24} />
-            </div>
-            <div className="flex-1 overflow-hidden">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs text-gray-500">2026.10.10</span>
-                <span className="text-[10px] font-bold text-[#0e7861] bg-[#EBF5F3] px-1.5 py-0.5 rounded">完成</span>
-              </div>
-              <h4 className="font-bold text-gray-900 text-sm truncate mb-1">吉祥寺にハートを描こう</h4>
-              <p className="text-xs text-gray-500 truncate">あなた 1.35 km・50分18秒・4人</p>
-            </div>
-            <ChevronRight size={20} className="text-gray-400 shrink-0" />
-          </button>
+          ))}
         </div>
 
-        {/* ホームに戻るボタン */}
         <button
           onClick={onBackToHome}
           className="w-full flex items-center justify-center gap-2 text-[#0e7861] font-bold py-3 hover:bg-[#EBF5F3] rounded-xl transition"

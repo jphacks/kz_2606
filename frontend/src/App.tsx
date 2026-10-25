@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
-import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
+import { buildInviteUrl, getActivityHistory, getCurrentSession, logout } from './lib/api';
+import { defaultMemberColor, normalizeMemberColor } from './lib/member_colors';
 import { shouldAcceptPoint } from './lib/geo';
 import {
   connectToRoom,
@@ -19,10 +20,12 @@ import {
   sendStart,
   sendStop,
 } from './lib/ws';
+import { drainOutbox, enqueuePoints } from './lib/outbox';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, Room, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
+import type { ActivityHistory, Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
-type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
+type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'join';
+const JoinScreen = lazy(() => import('./components/JoinScreen'));
 
 function formatRouteElapsedTime(milliseconds: number): string {
   const totalMinutes = Math.floor(milliseconds / 60_000);
@@ -31,26 +34,36 @@ function formatRouteElapsedTime(milliseconds: number): string {
   return hours > 0 ? `${hours}時間${minutes}分` : `${minutes}分`;
 }
 
-function getScreenFromPath(path: string): Screen {
+function getScreenFromPath(path: string, hasInviteRoom: boolean): Screen {
   if (path === '/login') return 'login';
   if (path === '/signin') return 'signin';
   if (path === '/solo') return 'solo_record';
   if (path === '/result') return 'result';
+  if (hasInviteRoom) return 'join';
   return 'home';
 }
 
 export default function App() {
-  return <MainExperience initialScreen={getScreenFromPath(window.location.pathname)} />;
+  return (
+    <MainExperience
+      initialScreen={getScreenFromPath(
+        window.location.pathname,
+        new URLSearchParams(window.location.search).has('room'),
+      )}
+    />
+  );
 }
 
 function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
-  const [userColor, setUserColor] = useState('#0E7861'); // 選択した軌跡カラー
+  const [userColor, setUserColor] = useState<string>(defaultMemberColor);
+  const [inviteRoomCode, setInviteRoomCode] = useState(
+    () => new URLSearchParams(window.location.search).get('room')?.trim().toUpperCase() ?? null,
+  );
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [roomTitle, setRoomTitle] = useState<string | null>(null);
   const [soloActivityName, setSoloActivityName] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
@@ -59,6 +72,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [activityHistory, setActivityHistory] = useState<ActivityHistory | null>(null);
+  const [activityError, setActivityError] = useState('');
+  const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [activityReloadKey, setActivityReloadKey] = useState(0);
   const [recordingError, setRecordingError] = useState('');
   const [recordingMessage, setRecordingMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -75,14 +92,31 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const activeRouteIdRef = useRef<number | null>(null);
   const activeRouteMemberIdRef = useRef<number | null>(null);
   const activeRouteColorRef = useRef(userColor);
+  const preservedMetersRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
   const routeStartedRef = useRef(false);
+  const routeIdRef = useRef<number | null>(null);
+  const ownMemberIdRef = useRef<number | null>(null);
+  const recordingRoomCodeRef = useRef<string | null>(null);
+  const recordingBufferRef = useRef(trackBuffer);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const shouldReconnectRef = useRef(false);
+  const stopRequestedRef = useRef(false);
   const recordingRef = useRef(false);
   const connectingRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stopRecordingRef = useRef<() => void>(() => {});
+
+  const syncOwnMemberColor = (snapshot: RoomSnapshot) => {
+    const ownMember = snapshot.members.find((member) => member.id === snapshot.you.id);
+    if (!ownMember) return;
+    const ownColor = normalizeMemberColor(ownMember.color);
+    setUserColor(ownColor);
+    activeRouteColorRef.current = ownColor;
+  };
 
   const preserveActiveTrack = () => {
     const routeId = activeRouteIdRef.current;
@@ -90,6 +124,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     const memberId = activeRouteMemberIdRef.current;
     if (routeId === null || !buffer || memberId === null) return;
 
+    preservedMetersRef.current += buffer.totalMeters;
+    buffer.finalize();
     otherTracksRef.current.set(routeId, {
       routeId,
       memberId,
@@ -111,7 +147,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (isMounted && authRequestVersion.current === requestVersion) {
           setUser(session?.user ?? null);
           setRoomCode(session?.room.code ?? null);
-          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -138,6 +173,43 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (currentScreen !== 'result') return;
+    if (!sessionLoaded) {
+      setIsActivityLoading(true);
+      return;
+    }
+    if (!user) {
+      setActivityHistory(null);
+      setActivityError('活動履歴を見るにはログインしてください。');
+      setIsActivityLoading(false);
+      return;
+    }
+
+    let isActive = true;
+    setIsActivityLoading(true);
+    setActivityHistory(null);
+    setActivityError('');
+    getActivityHistory()
+      .then((history) => {
+        if (isActive) setActivityHistory(history);
+      })
+      .catch((error: unknown) => {
+        console.error('活動履歴を取得できませんでした:', error);
+        if (isActive) {
+          setActivityHistory(null);
+          setActivityError(error instanceof Error ? error.message : '活動履歴を取得できませんでした');
+        }
+      })
+      .finally(() => {
+        if (isActive) setIsActivityLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [activityReloadKey, currentScreen, sessionLoaded, user]);
 
   useEffect(() => {
     const activeRoomCode = currentScreen === 'solo_record' ||
@@ -195,6 +267,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           return;
         }
         myMemberId = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
         otherTracksRef.current.clear();
         for (const route of snapshot.routes) {
           // The active route is drawn locally; render ended routes from the snapshot.
@@ -204,6 +277,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           const buffer = new TrackBuffer();
           for (const point of routePoints.get(route.id) ?? []) {
             buffer.add(point);
+          }
+          if (route.endedAt !== null) {
+            buffer.finalize();
           }
           otherTracksRef.current.set(route.id, {
             routeId: route.id,
@@ -259,6 +335,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           console.error('サーバーから不正なメンバー情報が返されました:', message);
           return;
         }
+        if (member.id === myMemberId) {
+          const ownColor = normalizeMemberColor(member.color);
+          setUserColor(ownColor);
+          activeRouteColorRef.current = ownColor;
+        }
         for (const [routeId, track] of otherTracksRef.current) {
           if (track.memberId === member.id && track.color !== member.color) {
             otherTracksRef.current.set(routeId, { ...track, color: member.color });
@@ -310,6 +391,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         }
         if (routeEnd.memberId === myMemberId && activeRouteIdRef.current === routeEnd.routeId) {
           preserveActiveTrack();
+        } else {
+          otherTracksRef.current.get(routeEnd.routeId)?.buffer.finalize();
         }
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -362,7 +445,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   }, [currentScreen, roomCode, sessionLoaded, teamRoom?.code]);
 
   useEffect(() => {
-    const handlePopState = () => setCurrentScreen(getScreenFromPath(window.location.pathname));
+    const handlePopState = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const roomCodeFromUrl = searchParams.get('room')?.trim().toUpperCase() ?? null;
+      setInviteRoomCode(roomCodeFromUrl);
+      setCurrentScreen(getScreenFromPath(window.location.pathname, searchParams.has('room')));
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -370,17 +458,24 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const navigateToScreen = (screen: Screen, replaceHistory = false) => {
     const pathByScreen: Partial<Record<Screen, string>> = {
       home: '/',
+      join: '/',
+      before_record: '/',
       login: '/login',
       signin: '/signin',
       solo_record: '/solo',
       result: '/result',
     };
     const path = pathByScreen[screen];
-    if (path && window.location.pathname !== path) {
+    const shouldKeepInvite = inviteRoomCode !== null &&
+      (screen === 'join' || screen === 'login' || screen === 'signin');
+    const nextUrl = path && shouldKeepInvite
+      ? `${path}?room=${encodeURIComponent(inviteRoomCode)}`
+      : path;
+    if (nextUrl && `${window.location.pathname}${window.location.search}` !== nextUrl) {
       if (replaceHistory) {
-        window.history.replaceState({}, '', path);
+        window.history.replaceState({}, '', nextUrl);
       } else {
-        window.history.pushState({}, '', path);
+        window.history.pushState({}, '', nextUrl);
       }
     }
     setCurrentScreen(screen);
@@ -395,7 +490,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       .then((session) => {
         if (authRequestVersion.current === requestVersion) {
           setRoomCode(session?.room.code ?? null);
-          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -406,11 +500,19 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setSessionLoaded(true);
         }
       });
-    navigateToScreen('home');
+    navigateToScreen(inviteRoomCode !== null ? 'join' : 'home', inviteRoomCode !== null);
   };
 
   const handleTeamCreated = (room: Room) => {
     setTeamRoom(room);
+  };
+
+  const handleJoinSuccess = (room: Room, member: Pick<RoomMember, 'color'>) => {
+    setTeamRoom(room);
+    setUserColor(normalizeMemberColor(member.color));
+    setRoomDataError('');
+    setInviteRoomCode(null);
+    navigateToScreen('before_record', true);
   };
 
   const handleLogout = async () => {
@@ -423,7 +525,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       stopRecording();
       setUser(null);
       setRoomCode(null);
-      setRoomTitle(null);
       setTeamRoom(null);
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
@@ -447,7 +548,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     }
   };
 
-  const stopRecording = () => {
+  function stopRecording(): void {
+    if (!recordingRef.current && !connectingRef.current && !stopRequestedRef.current) return;
+
+    stopRequestedRef.current = true;
+    recordingRef.current = false;
+    connectingRef.current = false;
+    setIsRecording(false);
+    setIsConnecting(true);
+    setRecordingMessage('記録を終了しています...');
     if (watchIdRef.current !== null) {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
@@ -455,34 +564,36 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     const socket = socketRef.current;
     preserveActiveTrack();
-    if (socket && socket.readyState === WebSocket.OPEN && routeStartedRef.current) {
-      // まとめ送信にしているので、最後の数秒分が残っている
-      if (pendingPointsRef.current.length > 0) {
-        try {
-          sendPoints(socket, pendingPointsRef.current);
-          pendingPointsRef.current = [];
-        } catch (err) {
-          console.error('終了前の位置情報を送信できませんでした:', err);
-        }
-      }
-      sendStop(socket);
-    }
     if (recordingStartedAtRef.current !== null) {
       setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
       recordingStartedAtRef.current = null;
     }
-    socketRef.current = null;
-    routeStartedRef.current = false;
-    recordingRef.current = false;
-    connectingRef.current = false;
-    pendingPointsRef.current = [];
-    setIsRecording(false);
-    setIsConnecting(false);
-    setRecordingMessage(hasRecorded ? '記録を終了しました' : '');
-    if (socket && socket.readyState < WebSocket.CLOSING) {
-      socket.close();
+
+    const roomCodeToStop = recordingRoomCodeRef.current;
+    const routeId = routeIdRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN && routeStartedRef.current && roomCodeToStop && routeId !== null) {
+      void finishRecordingOnSocket(socket, roomCodeToStop, routeId);
+      return;
     }
-  };
+
+    if (socket && socket.readyState < WebSocket.OPEN) {
+      shouldReconnectRef.current = true;
+      return;
+    }
+    if (socket && socket.readyState === WebSocket.OPEN && routeId === null) return;
+
+    if (roomCodeToStop) {
+      shouldReconnectRef.current = true;
+      void persistPendingPoints(roomCodeToStop, routeId)
+        .catch((error: unknown) => {
+          console.error('未送信の位置情報を保存できませんでした:', error);
+          setRecordingError('未送信の位置情報を保存できませんでした。記録を終了できません。');
+        })
+        .finally(() => scheduleReconnect());
+      return;
+    }
+    completeRecordingStop(socket);
+  }
   stopRecordingRef.current = stopRecording;
 
   useEffect(() => {
@@ -534,6 +645,348 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     );
   };
 
+  async function persistPendingPoints(room: string, routeId: number | null): Promise<void> {
+    if (routeId === null || pendingPointsRef.current.length === 0) return;
+    const points = pendingPointsRef.current;
+    pendingPointsRef.current = [];
+    try {
+      const dropped = await enqueuePoints(room, routeId, points);
+      if (dropped > 0) {
+        setRecordingError(`保存容量の上限に達したため、古い位置情報 ${dropped} 点を削除しました。`);
+      }
+    } catch (error) {
+      pendingPointsRef.current = points.concat(pendingPointsRef.current);
+      throw error;
+    }
+  }
+
+  async function drainQueuedPoints(socket: WebSocket, room: string, routeId: number): Promise<void> {
+    await drainOutbox(room, routeId, (points) => {
+      if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket disconnected while draining the outbox');
+      }
+      sendPoints(socket, points);
+    });
+  }
+
+  function completeRecordingStop(socket: WebSocket | null): void {
+    const room = recordingRoomCodeRef.current;
+    const routeId = routeIdRef.current;
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    if (recordingStartedAtRef.current !== null) {
+      setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
+      recordingStartedAtRef.current = null;
+    }
+    if (room && routeId !== null) {
+      void persistPendingPoints(room, routeId).catch((error: unknown) => {
+        console.error('終了時の未送信位置情報を保存できませんでした:', error);
+        setRecordingError('終了時の未送信位置情報を保存できませんでした。');
+      });
+    }
+    shouldReconnectRef.current = false;
+    stopRequestedRef.current = false;
+    recordingRef.current = false;
+    connectingRef.current = false;
+    routeStartedRef.current = false;
+    routeIdRef.current = null;
+    recordingRoomCodeRef.current = null;
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    reconnectAttemptRef.current = 0;
+    if (socketRef.current === socket) socketRef.current = null;
+    setIsRecording(false);
+    setIsConnecting(false);
+    setRecordingMessage(hasRecorded ? '記録を終了しました' : '');
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+  }
+
+  async function finishRecordingOnSocket(socket: WebSocket, room: string, routeId: number): Promise<void> {
+    try {
+      await persistPendingPoints(room, routeId);
+      await drainQueuedPoints(socket, room, routeId);
+    } catch (error) {
+      console.error('終了前の位置情報を送信できませんでした:', error);
+      setRecordingError('未送信の位置情報を保存しましたが、送信できませんでした。');
+    }
+
+    try {
+      if (socketRef.current === socket && socket.readyState === WebSocket.OPEN) {
+        sendStop(socket);
+      }
+      completeRecordingStop(socket);
+    } catch (error) {
+      console.error('記録終了をサーバーへ送信できませんでした:', error);
+      setRecordingError('記録終了をサーバーへ送信できませんでした。再接続して終了します。');
+      shouldReconnectRef.current = true;
+      setIsConnecting(true);
+      scheduleReconnect();
+    }
+  }
+
+  function scheduleReconnect(): void {
+    if (!shouldReconnectRef.current || reconnectTimerRef.current !== null) return;
+    const delay = Math.min(30_000, 500 * 2 ** reconnectAttemptRef.current);
+    reconnectAttemptRef.current += 1;
+    setIsConnecting(true);
+    setRecordingMessage('接続が切れました。再接続しています...');
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      const room = recordingRoomCodeRef.current;
+      if (room && shouldReconnectRef.current) {
+        connectRecordingSocket(room, recordingBufferRef.current);
+      }
+    }, delay);
+  }
+
+  function connectRecordingSocket(room: string, buffer: TrackBuffer): void {
+    let socket: WebSocket;
+    try {
+      socket = connectToRoom(room);
+      socketRef.current = socket;
+    } catch (error) {
+      console.error('WebSocketの再接続を開始できませんでした:', error);
+      scheduleReconnect();
+      return;
+    }
+
+    socket.onopen = () => {
+      if (socketRef.current !== socket) return;
+      setRecordingMessage('接続を確認しています...');
+    };
+
+    socket.onmessage = (event: MessageEvent<string>) => {
+      if (socketRef.current !== socket) return;
+      let message: unknown;
+      try {
+        message = JSON.parse(event.data);
+      } catch (error) {
+        console.error('WebSocketメッセージを解析できませんでした:', error);
+        setRecordingError('サーバーから不正な応答が届きました。再接続しています。');
+        socket.close();
+        return;
+      }
+
+      if (typeof message !== 'object' || message === null || !('t' in message)) return;
+      if (message.t === 'snapshot') {
+        const parsedSnapshot = parseRoomSnapshot(message);
+        if (!parsedSnapshot || parsedSnapshot.snapshot.room.code.toUpperCase() !== room.toUpperCase()) {
+          console.error('再接続時に不正なルーム情報を受信しました:', message);
+          setRecordingError('再接続時に不正なルーム情報を受信しました。');
+          socket.close();
+          return;
+        }
+        const { snapshot } = parsedSnapshot;
+
+        ownMemberIdRef.current = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
+        const activeRoute = snapshot.routes.find(
+          (route) => route.member === snapshot.you.id && route.endedAt === null
+        );
+        if (activeRoute) {
+          if (routeIdRef.current !== null && routeIdRef.current !== activeRoute.id) {
+            const previousRouteId = routeIdRef.current;
+            console.warn('再接続先の記録IDが変わりました。古いrouteのoutboxは保持します。', {
+              previous: previousRouteId,
+              active: activeRoute.id,
+            });
+            if (watchIdRef.current !== null) {
+              navigator.geolocation.clearWatch(watchIdRef.current);
+              watchIdRef.current = null;
+            }
+            void persistPendingPoints(room, previousRouteId)
+              .then(() => {
+                if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) return;
+                preserveActiveTrack();
+                const nextBuffer = new TrackBuffer();
+                recordingBufferRef.current = nextBuffer;
+                activeTrackBufferRef.current = nextBuffer;
+                activeRouteIdRef.current = activeRoute.id;
+                activeRouteMemberIdRef.current = activeRoute.member;
+                activeRouteColorRef.current = activeRoute.color;
+                reconnectAttemptRef.current = 0;
+                setTrackBuffer(nextBuffer);
+                routeIdRef.current = activeRoute.id;
+                routeStartedRef.current = true;
+                if (stopRequestedRef.current) {
+                  void finishRecordingOnSocket(socket, room, activeRoute.id);
+                  return;
+                }
+                recordingRef.current = true;
+                connectingRef.current = false;
+                setIsRecording(true);
+                setIsConnecting(false);
+                setHasRecorded(true);
+                setRecordingMessage('位置情報を記録してサーバーへ送信中です');
+                startLocationWatch(nextBuffer);
+                void resumeActiveRoute(socket, room, activeRoute.id);
+              })
+              .catch((error: unknown) => {
+                console.error('記録ID切り替え前の位置情報を保存できませんでした:', error);
+                setRecordingError('未送信の位置情報を保存できませんでした。再接続を続けます。');
+                socket.close();
+              });
+            return;
+          }
+          routeIdRef.current = activeRoute.id;
+          const activeBuffer = activeRouteIdRef.current === null ? new TrackBuffer() : buffer;
+          if (activeBuffer !== buffer) {
+            recordingBufferRef.current = activeBuffer;
+            setTrackBuffer(activeBuffer);
+          }
+          activeTrackBufferRef.current = activeBuffer;
+          activeRouteIdRef.current = activeRoute.id;
+          activeRouteMemberIdRef.current = activeRoute.member;
+          activeRouteColorRef.current = activeRoute.color;
+          routeStartedRef.current = true;
+          reconnectAttemptRef.current = 0;
+          if (stopRequestedRef.current) {
+            void finishRecordingOnSocket(socket, room, activeRoute.id);
+            return;
+          }
+          recordingRef.current = true;
+          connectingRef.current = false;
+          setIsRecording(true);
+          setIsConnecting(false);
+          setRecordingMessage('位置情報を記録してサーバーへ送信中です');
+          startLocationWatch(activeBuffer);
+          void resumeActiveRoute(socket, room, activeRoute.id);
+          return;
+        }
+
+        if (stopRequestedRef.current) {
+          completeRecordingStop(socket);
+          return;
+        }
+        if (routeIdRef.current !== null) {
+          const previousRouteId = routeIdRef.current;
+          if (watchIdRef.current !== null) {
+            navigator.geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
+          }
+          void persistPendingPoints(room, previousRouteId)
+            .then(() => {
+              if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) return;
+              if (stopRequestedRef.current) {
+                completeRecordingStop(socket);
+                return;
+              }
+              preserveActiveTrack();
+              const nextBuffer = new TrackBuffer();
+              recordingBufferRef.current = nextBuffer;
+              activeTrackBufferRef.current = nextBuffer;
+              activeRouteIdRef.current = null;
+              activeRouteMemberIdRef.current = null;
+              setTrackBuffer(nextBuffer);
+              routeIdRef.current = null;
+              sendStart(socket);
+              connectingRef.current = true;
+              setIsConnecting(true);
+            })
+            .catch((error: unknown) => {
+              console.error('再接続前の位置情報を保存できませんでした:', error);
+              setRecordingError('未送信の位置情報を保存できませんでした。再接続を続けます。');
+              socket.close();
+            });
+          return;
+        }
+
+        try {
+          sendStart(socket);
+          connectingRef.current = true;
+          setIsConnecting(true);
+        } catch (error) {
+          console.error('記録開始メッセージを送信できませんでした:', error);
+          setRecordingError('記録開始をサーバーへ送信できませんでした。');
+          socket.close();
+        }
+        return;
+      }
+
+      if (message.t === 'route') {
+        const route = parseRouteStartedEvent(message);
+        if (!route || route.member !== ownMemberIdRef.current) return;
+        const startedRouteId = route.id;
+        if (routeIdRef.current !== null && routeIdRef.current !== startedRouteId) {
+          console.error('新しいroute開始前に古い未送信点を保存できませんでした:', {
+            previous: routeIdRef.current,
+            started: startedRouteId,
+          });
+          setRecordingError('記録IDが一致しないため、未送信データは保留されています。');
+          socket.close();
+          return;
+        }
+        routeIdRef.current = startedRouteId;
+        activeRouteIdRef.current = startedRouteId;
+        activeRouteMemberIdRef.current = route.member;
+        activeRouteColorRef.current = route.color;
+        activeTrackBufferRef.current = recordingBufferRef.current;
+        routeStartedRef.current = true;
+        reconnectAttemptRef.current = 0;
+        if (stopRequestedRef.current) {
+          void finishRecordingOnSocket(socket, room, startedRouteId);
+          return;
+        }
+        recordingRef.current = true;
+        connectingRef.current = false;
+        recordingStartedAtRef.current ??= Date.now();
+        setIsConnecting(false);
+        setIsRecording(true);
+        setHasRecorded(true);
+        setRecordingMessage('位置情報を記録してサーバーへ送信中です');
+        startLocationWatch(recordingBufferRef.current);
+        void resumeActiveRoute(socket, room, startedRouteId);
+      } else if (message.t === 'route_end' && 'route' in message && message.route === routeIdRef.current) {
+        completeRecordingStop(socket);
+      } else if (message.t === 'error') {
+        const messageText = 'message' in message && typeof message.message === 'string'
+          ? message.message
+          : 'サーバーが記録を受け付けませんでした。';
+        setRecordingError(messageText);
+        shouldReconnectRef.current = false;
+        completeRecordingStop(socket);
+      }
+    };
+
+    socket.onerror = () => {
+      if (socketRef.current === socket) {
+        setRecordingMessage('接続が切れました。再接続しています...');
+      }
+    };
+    socket.onclose = () => {
+      if (socketRef.current !== socket) return;
+      socketRef.current = null;
+      routeStartedRef.current = false;
+      if (!shouldReconnectRef.current) return;
+      const routeId = routeIdRef.current;
+      if (routeId !== null) {
+        void persistPendingPoints(room, routeId)
+          .catch((error: unknown) => {
+            console.error('切断中の位置情報を保存できませんでした:', error);
+            setRecordingError('切断中の位置情報を保存できませんでした。');
+          })
+          .finally(() => scheduleReconnect());
+      } else {
+        scheduleReconnect();
+      }
+    };
+  }
+
+  async function resumeActiveRoute(socket: WebSocket, room: string, routeId: number): Promise<void> {
+    try {
+      await persistPendingPoints(room, routeId);
+      await drainQueuedPoints(socket, room, routeId);
+    } catch (error) {
+      console.error('未送信の位置情報を再送できませんでした:', error);
+      setRecordingError('未送信の位置情報を再送できませんでした。再接続を続けます。');
+      socket.close();
+    }
+  }
+
   useEffect(() => {
     if (
       !isRecording ||
@@ -545,7 +998,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       if (recordingStartedAtRef.current !== null) {
         setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
       }
-      setDistanceTravelled(trackBuffer.totalMeters);
+      setDistanceTravelled(preservedMetersRef.current + trackBuffer.totalMeters);
     };
     updateStats();
     const statsTimerId = window.setInterval(updateStats, 1000);
@@ -553,18 +1006,19 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     // 溜めた点をまとめて送る（仕様11章 FLUSH_MS）
     const flushPoints = () => {
       const socket = socketRef.current;
-      if (!socket || !routeStartedRef.current || socket.readyState !== WebSocket.OPEN) return;
-      if (pendingPointsRef.current.length === 0) return;
-      const queuedPoints = pendingPointsRef.current;
-      pendingPointsRef.current = [];
-      try {
-        sendPoints(socket, queuedPoints);
-      } catch (err) {
-        console.error('位置情報の送信に失敗しました:', err);
-        pendingPointsRef.current = queuedPoints.concat(pendingPointsRef.current);
-        setRecordingError('位置情報を送信できませんでした。接続を確認して再度お試しください。');
-        stopRecordingRef.current();
-      }
+      const room = recordingRoomCodeRef.current;
+      const routeId = routeIdRef.current;
+      if (!room || routeId === null) return;
+      void persistPendingPoints(room, routeId)
+        .then(() => {
+          if (socket && routeStartedRef.current && socket.readyState === WebSocket.OPEN) {
+            return drainQueuedPoints(socket, room, routeId);
+          }
+        })
+        .catch((error: unknown) => {
+          console.error('未送信の位置情報を保存または再送できませんでした:', error);
+          setRecordingError('未送信の位置情報を保存または再送できませんでした。接続を確認してください。');
+        });
     };
     const flushTimerId = window.setInterval(flushPoints, flushIntervalMilliseconds);
 
@@ -596,9 +1050,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     setRecordingError('');
     setRecordingMessage('サーバーに接続しています...');
     const buffer = new TrackBuffer();
+    preservedMetersRef.current = 0;
+    recordingBufferRef.current = buffer;
     activeTrackBufferRef.current = buffer;
     activeRouteIdRef.current = null;
     activeRouteMemberIdRef.current = null;
+    activeRouteColorRef.current = userColor;
     setTrackBuffer(buffer);
     setDistanceTravelled(0);
     setElapsedSeconds(0);
@@ -606,111 +1063,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     recordingStartedAtRef.current = null;
     pendingPointsRef.current = [];
     routeStartedRef.current = false;
+    routeIdRef.current = null;
+    ownMemberIdRef.current = null;
+    recordingRoomCodeRef.current = recordingRoomCode;
+    reconnectAttemptRef.current = 0;
+    shouldReconnectRef.current = true;
+    stopRequestedRef.current = false;
     connectingRef.current = true;
+    recordingRef.current = false;
     setIsConnecting(true);
-
-    let socket: WebSocket;
-    try {
-      socket = connectToRoom(recordingRoomCode);
-      socketRef.current = socket;
-    } catch (err) {
-      console.error('WebSocketの接続を開始できませんでした:', err);
-      setRecordingError('サーバーに接続できませんでした。');
-      stopRecording();
-      return;
-    }
-
-    socket.onopen = () => {
-      try {
-        sendStart(socket);
-        startLocationWatch(buffer);
-      } catch (err) {
-        console.error('記録開始メッセージを送信できませんでした:', err);
-        setRecordingError('サーバーに記録開始を送信できませんでした。');
-        stopRecording();
-      }
-    };
-
-    socket.onmessage = (event: MessageEvent<string>) => {
-      let message: unknown;
-      try {
-        message = JSON.parse(event.data);
-      } catch (err) {
-        console.error('WebSocketメッセージを解析できませんでした:', err);
-        setRecordingError('サーバーから不正な応答が届きました。');
-        stopRecording();
-        return;
-      }
-
-      if (typeof message !== 'object' || message === null || !('t' in message)) {
-        return;
-      }
-      if (message.t === 'error') {
-        const messageText = 'message' in message && typeof message.message === 'string'
-          ? message.message
-          : 'サーバーが記録を受け付けませんでした。';
-        setRecordingError(messageText);
-        stopRecording();
-        return;
-      }
-      if (message.t === 'route' && !routeStartedRef.current) {
-        const route = parseRouteStartedEvent(message);
-        if (!route) {
-          console.error('サーバーから不正な記録開始情報が返されました:', message);
-          setRecordingError('サーバーから不正な記録情報が届きました。');
-          stopRecording();
-          return;
-        }
-        activeRouteIdRef.current = route.id;
-        activeRouteMemberIdRef.current = route.member;
-        activeRouteColorRef.current = route.color;
-        routeStartedRef.current = true;
-        recordingRef.current = true;
-        connectingRef.current = false;
-        recordingStartedAtRef.current = Date.now();
-        setIsConnecting(false);
-        setIsRecording(true);
-        setHasRecorded(true);
-        setRecordingMessage('位置情報を記録してサーバーへ送信中です');
-        try {
-          sendPoints(socket, pendingPointsRef.current);
-          pendingPointsRef.current = [];
-        } catch (err) {
-          console.error('取得済み位置情報の送信に失敗しました:', err);
-          setRecordingError('取得済みの位置情報を送信できませんでした。');
-          stopRecording();
-        }
-      }
-    };
-
-    socket.onerror = () => {
-      setRecordingError('サーバーとのWebSocket通信に失敗しました。');
-    };
-    socket.onclose = () => {
-      if (socketRef.current !== socket) return;
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-        watchIdRef.current = null;
-      }
-      preserveActiveTrack();
-      socketRef.current = null;
-      routeStartedRef.current = false;
-      const wasActive = recordingRef.current || connectingRef.current;
-      recordingRef.current = false;
-      connectingRef.current = false;
-      if (recordingStartedAtRef.current !== null) {
-        setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
-        recordingStartedAtRef.current = null;
-      }
-      pendingPointsRef.current = [];
-      setRecordingMessage('');
-      setIsRecording(false);
-      setIsConnecting(false);
-      if (wasActive) {
-        setRecordingMessage('');
-        setRecordingError((currentError) => currentError || 'サーバーとの接続が終了しました。');
-      }
-    };
+    connectRecordingSocket(recordingRoomCode, buffer);
   };
 
   return (
@@ -797,6 +1159,25 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           </div>
         )}
 
+        {currentScreen === 'join' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Suspense fallback={<div className="p-6 text-sm text-[#556B5D]">招待画面を読み込んでいます...</div>}>
+              <JoinScreen
+                roomCode={inviteRoomCode}
+                user={user}
+                isSessionLoading={!sessionLoaded}
+                onJoinSuccess={handleJoinSuccess}
+                onNavigateToLogin={() => navigateToScreen('login')}
+                onNavigateToRegister={() => navigateToScreen('signin')}
+                onBack={() => {
+                  setInviteRoomCode(null);
+                  navigateToScreen('home');
+                }}
+              />
+            </Suspense>
+          </div>
+        )}
+
         {/* 2. 認証画面 */}
         {(currentScreen === 'login' || currentScreen === 'signin') && (
           <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -814,9 +1195,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <Result
               username={user?.username}
-              roomName={soloActivityName ?? roomTitle ?? undefined}
+              history={activityHistory}
+              isLoading={isActivityLoading}
+              error={activityError}
               isRecording={isRecording}
               isConnecting={isConnecting}
+              onRetry={() => setActivityReloadKey((value) => value + 1)}
               onBackToHome={() => navigateToScreen('home')}
             />
           </div>
