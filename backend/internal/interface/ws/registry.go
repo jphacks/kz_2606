@@ -90,17 +90,19 @@ func (r *Registry) BroadcastRoute(roomCode string, route domain.Route, member do
 	r.broadcastEvent(roomCode, excludeMemberID, struct {
 		Type  string `json:"t"`
 		Route struct {
-			ID     int64  `json:"id"`
-			Member int64  `json:"member"`
-			Color  string `json:"color"`
+			ID        int64     `json:"id"`
+			Member    int64     `json:"member"`
+			Color     string    `json:"color"`
+			StartedAt time.Time `json:"startedAt"`
 		} `json:"route"`
 	}{
 		Type: "route",
 		Route: struct {
-			ID     int64  `json:"id"`
-			Member int64  `json:"member"`
-			Color  string `json:"color"`
-		}{ID: route.ID, Member: route.MemberID, Color: member.Color},
+			ID        int64     `json:"id"`
+			Member    int64     `json:"member"`
+			Color     string    `json:"color"`
+			StartedAt time.Time `json:"startedAt"`
+		}{ID: route.ID, Member: route.MemberID, Color: member.Color, StartedAt: route.StartedAt},
 	})
 }
 
@@ -116,12 +118,13 @@ func (r *Registry) BroadcastPoints(roomCode string, routeID int64, points []doma
 	}{Type: "points", Route: routeID, Points: pts})
 }
 
-func (r *Registry) BroadcastRouteEnd(roomCode string, routeID, memberID, excludeMemberID int64) {
+func (r *Registry) BroadcastRouteEnd(roomCode string, routeID, memberID int64, endedAt time.Time, excludeMemberID int64) {
 	r.broadcastEvent(roomCode, excludeMemberID, struct {
-		Type   string `json:"t"`
-		Route  int64  `json:"route"`
-		Member int64  `json:"member"`
-	}{Type: "route_end", Route: routeID, Member: memberID})
+		Type    string    `json:"t"`
+		Route   int64     `json:"route"`
+		Member  int64     `json:"member"`
+		EndedAt time.Time `json:"endedAt"`
+	}{Type: "route_end", Route: routeID, Member: memberID, EndedAt: endedAt})
 }
 
 func (r *Registry) BroadcastLeave(roomCode string, memberID int64) {

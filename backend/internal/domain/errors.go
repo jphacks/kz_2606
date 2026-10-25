@@ -13,6 +13,6 @@ var (
 	ErrPrivateRoom      = errors.New("private room")
 	ErrRoomClosed       = errors.New("room is closed")
 	ErrNoActiveRoute    = errors.New("member has no active route")
-	ErrAlreadyRecording = errors.New("member already has an active route")
+	ErrRouteInUse       = errors.New("room already has an active route")
 	ErrInvalidPoints    = errors.New("invalid points")
 )

@@ -26,9 +26,9 @@ const (
 type recordingSession interface {
 	StartRoute(context.Context, string, int64) (domain.Room, domain.Member, domain.Route, error)
 	AppendPoints(context.Context, string, int64, []domain.Point) (int64, domain.Member, error)
-	StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, error)
+	StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, time.Time, error)
 	UpdateMember(context.Context, string, int64, *string, *string) (domain.Member, bool, error)
-	Leave(context.Context, string, int64) (domain.Member, int64, bool, error)
+	Leave(context.Context, string, int64) (domain.Member, int64, time.Time, bool, error)
 }
 
 type client struct {
@@ -78,14 +78,16 @@ func (c *client) disconnectAfter(message []byte) {
 func (c *client) shutdown() {
 	c.closeOne.Do(func() {
 		close(c.done)
-		if c.registry.Remove(c) {
-			if c.onLeave != nil {
-				c.onLeave()
-			}
-			c.registry.BroadcastLeave(c.roomCode, c.memberID)
-		}
+		lastConnection := c.registry.Remove(c)
 		if err := c.conn.Close(); err != nil {
 			slog.Debug("close websocket connection failed", "err", err)
+		}
+		if lastConnection {
+			if c.onLeave != nil {
+				go c.onLeave()
+			} else {
+				c.registry.BroadcastLeave(c.roomCode, c.memberID)
+			}
 		}
 	})
 }
@@ -196,8 +198,8 @@ func (c *client) handleStart() {
 		c.sendSessionError(err)
 		return
 	}
-	c.registry.BroadcastRoute(c.roomCode, route, member, c.memberID)
-	c.registry.BroadcastMember(c.roomCode, member, true, c.memberID)
+	c.registry.BroadcastRoute(c.roomCode, route, member, 0)
+	c.registry.BroadcastMember(c.roomCode, member, true, 0)
 }
 
 func (c *client) handlePoints(payload []byte) {
@@ -251,13 +253,13 @@ func (c *client) handleStop() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
 	defer cancel()
-	_, member, routeID, err := c.sessions.StopRoute(ctx, c.roomCode, c.memberID)
+	_, member, routeID, endedAt, err := c.sessions.StopRoute(ctx, c.roomCode, c.memberID)
 	if err != nil {
 		c.sendSessionError(err)
 		return
 	}
-	c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, c.memberID)
-	c.registry.BroadcastMember(c.roomCode, member, false, c.memberID)
+	c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, endedAt, 0)
+	c.registry.BroadcastMember(c.roomCode, member, false, 0)
 }
 
 func (c *client) handleMember(payload []byte) {
@@ -280,24 +282,27 @@ func (c *client) handleMember(payload []byte) {
 		c.sendSessionError(err)
 		return
 	}
-	c.registry.BroadcastMember(c.roomCode, member, recording, c.memberID)
+	c.registry.BroadcastMember(c.roomCode, member, recording, 0)
 }
 
 func (c *client) handleLeave() {
 	if c.sessions == nil {
+		c.registry.BroadcastLeave(c.roomCode, c.memberID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sessionTimeout)
 	defer cancel()
-	member, routeID, ended, err := c.sessions.Leave(ctx, c.roomCode, c.memberID)
+	member, routeID, endedAt, ended, err := c.sessions.Leave(ctx, c.roomCode, c.memberID)
 	if err != nil {
 		slog.Error("close route after websocket disconnect failed", "room", c.roomCode, "member", c.memberID, "err", err)
+		c.registry.BroadcastLeave(c.roomCode, c.memberID)
 		return
 	}
 	if ended {
-		c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, c.memberID)
-		c.registry.BroadcastMember(c.roomCode, member, false, c.memberID)
+		c.registry.BroadcastRouteEnd(c.roomCode, routeID, c.memberID, endedAt, 0)
+		c.registry.BroadcastMember(c.roomCode, member, false, 0)
 	}
+	c.registry.BroadcastLeave(c.roomCode, c.memberID)
 }
 
 func (c *client) sendSessionError(err error) {
@@ -306,8 +311,8 @@ func (c *client) sendSessionError(err error) {
 		c.sendError("room_closed", "この部屋は締め切られています")
 	case errors.Is(err, domain.ErrNoActiveRoute):
 		c.sendError("no_active_route", "記録が開始されていません")
-	case errors.Is(err, domain.ErrAlreadyRecording):
-		c.sendError("already_recording", "すでに記録中です")
+	case errors.Is(err, domain.ErrRouteInUse):
+		c.sendError("route_in_use", "他のメンバーが記録中です")
 	case errors.Is(err, domain.ErrInvalidPoints):
 		c.sendError("invalid_points", "点の値が正しくありません")
 	case errors.Is(err, domain.ErrMemberBanned):

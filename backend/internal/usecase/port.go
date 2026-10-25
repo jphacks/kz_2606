@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"github.com/jphacks/kz_2606/backend/internal/domain"
 )
@@ -30,7 +31,7 @@ type SessionCodec interface {
 type SessionRepository interface {
 	StartRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, domain.Route, error)
 	AppendPoints(ctx context.Context, code string, memberID int64, points []domain.Point) (int64, domain.Member, error)
-	StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, error)
+	StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, time.Time, error)
 	UpdateMember(ctx context.Context, code string, memberID int64, displayName, color *string) (domain.Member, bool, error)
-	Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, bool, error)
+	Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, time.Time, bool, error)
 }

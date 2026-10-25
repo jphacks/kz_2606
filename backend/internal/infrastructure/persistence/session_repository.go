@@ -3,8 +3,10 @@ package persistence
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jphacks/kz_2606/backend/internal/domain"
@@ -42,13 +44,13 @@ func (r *SessionRepository) StartRoute(ctx context.Context, code string, memberI
 	var active bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM routes WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
+			SELECT 1 FROM routes WHERE room_id = $1 AND ended_at IS NULL
 		)
-	`, room.ID, memberID).Scan(&active); err != nil {
+	`, room.ID).Scan(&active); err != nil {
 		return domain.Room{}, domain.Member{}, domain.Route{}, err
 	}
 	if active {
-		return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrAlreadyRecording
+		return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrRouteInUse
 	}
 	var route domain.Route
 	route.MemberID = memberID
@@ -57,6 +59,10 @@ func (r *SessionRepository) StartRoute(ctx context.Context, code string, memberI
 		RETURNING id, started_at
 	`, room.ID, memberID).Scan(&route.ID, &route.StartedAt)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return domain.Room{}, domain.Member{}, domain.Route{}, domain.ErrRouteInUse
+		}
 		return domain.Room{}, domain.Member{}, domain.Route{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -106,25 +112,26 @@ func (r *SessionRepository) AppendPoints(ctx context.Context, code string, membe
 	return routeID, member, nil
 }
 
-func (r *SessionRepository) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, error) {
+func (r *SessionRepository) StopRoute(ctx context.Context, code string, memberID int64) (domain.Room, domain.Member, int64, time.Time, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, err
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	room, err := lockSessionRoom(ctx, tx, code)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, err
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
 	}
 	member, err := lockSessionMember(ctx, tx, room.ID, memberID)
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, err
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
 	}
 	if member.BannedAt != nil {
-		return domain.Room{}, domain.Member{}, 0, domain.ErrMemberBanned
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, domain.ErrMemberBanned
 	}
 	var routeID int64
+	var endedAt time.Time
 	err = tx.QueryRow(ctx, `
 		UPDATE routes SET ended_at = now()
 		WHERE id = (
@@ -132,18 +139,18 @@ func (r *SessionRepository) StopRoute(ctx context.Context, code string, memberID
 			WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
 			FOR UPDATE
 		)
-		RETURNING id
-	`, room.ID, memberID).Scan(&routeID)
+		RETURNING id, ended_at
+	`, room.ID, memberID).Scan(&routeID, &endedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.Room{}, domain.Member{}, 0, domain.ErrNoActiveRoute
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, domain.ErrNoActiveRoute
 	}
 	if err != nil {
-		return domain.Room{}, domain.Member{}, 0, err
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Room{}, domain.Member{}, 0, err
+		return domain.Room{}, domain.Member{}, 0, time.Time{}, err
 	}
-	return room, member, routeID, nil
+	return room, member, routeID, endedAt, nil
 }
 
 func (r *SessionRepository) UpdateMember(ctx context.Context, code string, memberID int64, displayName, color *string) (domain.Member, bool, error) {
@@ -190,22 +197,23 @@ func (r *SessionRepository) UpdateMember(ctx context.Context, code string, membe
 	return member, recording, nil
 }
 
-func (r *SessionRepository) Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, bool, error) {
+func (r *SessionRepository) Leave(ctx context.Context, code string, memberID int64) (domain.Member, int64, time.Time, bool, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return domain.Member{}, 0, false, err
+		return domain.Member{}, 0, time.Time{}, false, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
 	room, err := lockSessionRoom(ctx, tx, code)
 	if err != nil {
-		return domain.Member{}, 0, false, err
+		return domain.Member{}, 0, time.Time{}, false, err
 	}
 	member, err := lockSessionMember(ctx, tx, room.ID, memberID)
 	if err != nil {
-		return domain.Member{}, 0, false, err
+		return domain.Member{}, 0, time.Time{}, false, err
 	}
 	var routeID int64
+	var endedAt time.Time
 	err = tx.QueryRow(ctx, `
 		UPDATE routes SET ended_at = now()
 		WHERE id = (
@@ -213,15 +221,15 @@ func (r *SessionRepository) Leave(ctx context.Context, code string, memberID int
 			WHERE room_id = $1 AND member_id = $2 AND ended_at IS NULL
 			FOR UPDATE
 		)
-		RETURNING id
-	`, room.ID, memberID).Scan(&routeID)
+		RETURNING id, ended_at
+	`, room.ID, memberID).Scan(&routeID, &endedAt)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return domain.Member{}, 0, false, err
+		return domain.Member{}, 0, time.Time{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return domain.Member{}, 0, false, err
+		return domain.Member{}, 0, time.Time{}, false, err
 	}
-	return member, routeID, err == nil, nil
+	return member, routeID, endedAt, err == nil, nil
 }
 
 func lockSessionRoom(ctx context.Context, tx pgx.Tx, code string) (domain.Room, error) {

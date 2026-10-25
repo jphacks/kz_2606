@@ -31,8 +31,8 @@ func (s *testRecordingSession) AppendPoints(_ context.Context, _ string, _ int64
 	return s.route.ID, s.member, nil
 }
 
-func (s *testRecordingSession) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, error) {
-	return domain.Room{Code: "ROOM01"}, s.member, s.route.ID, nil
+func (s *testRecordingSession) StopRoute(context.Context, string, int64) (domain.Room, domain.Member, int64, time.Time, error) {
+	return domain.Room{Code: "ROOM01"}, s.member, s.route.ID, time.UnixMilli(1761278403000).UTC(), nil
 }
 
 func (s *testRecordingSession) UpdateMember(_ context.Context, _ string, _ int64, name, color *string) (domain.Member, bool, error) {
@@ -45,8 +45,8 @@ func (s *testRecordingSession) UpdateMember(_ context.Context, _ string, _ int64
 	return s.member, false, nil
 }
 
-func (s *testRecordingSession) Leave(context.Context, string, int64) (domain.Member, int64, bool, error) {
-	return s.member, s.route.ID, true, nil
+func (s *testRecordingSession) Leave(context.Context, string, int64) (domain.Member, int64, time.Time, bool, error) {
+	return s.member, s.route.ID, time.UnixMilli(1761278403000).UTC(), true, nil
 }
 
 func TestClientRecordingOperationsBroadcastEvents(t *testing.T) {
@@ -62,7 +62,13 @@ func TestClientRecordingOperationsBroadcastEvents(t *testing.T) {
 	registry.Add(observer)
 
 	source.handleInbound([]byte(`{"t":"start"}`))
-	assertEventType(t, observer, "route")
+	routeEvent := readEvent(t, observer)
+	routePayload := routeEvent["route"].(map[string]any)
+	if routeEvent["t"] != "route" || routePayload["startedAt"] == nil {
+		t.Fatalf("route event missing startedAt: %+v", routeEvent)
+	}
+	assertEventType(t, source, "route")
+	assertEventType(t, source, "member")
 	assertEventType(t, observer, "member")
 
 	source.handleInbound([]byte(`{"t":"points","pts":[[43.06,141.35,1761278400000,8.2]]}`))
@@ -80,9 +86,21 @@ func TestClientRecordingOperationsBroadcastEvents(t *testing.T) {
 	if member["t"] != "member" || memberPayload["displayName"] != "walk" || memberPayload["color"] != "#aabbcc" {
 		t.Fatalf("member event = %+v", member)
 	}
+	selfMember := readEvent(t, source)
+	if selfMember["member"].(map[string]any)["displayName"] != "walk" {
+		t.Fatalf("sender did not receive member event: %+v", selfMember)
+	}
 
 	source.handleInbound([]byte(`{"t":"stop"}`))
-	assertEventType(t, observer, "route_end")
+	routeEnd := readEvent(t, observer)
+	if routeEnd["t"] != "route_end" || routeEnd["endedAt"] == nil {
+		t.Fatalf("route_end event missing endedAt: %+v", routeEnd)
+	}
+	ownRouteEnd := readEvent(t, source)
+	if ownRouteEnd["t"] != "route_end" || ownRouteEnd["endedAt"] == nil {
+		t.Fatalf("sender did not receive route_end with endedAt: %+v", ownRouteEnd)
+	}
+	assertEventType(t, source, "member")
 	assertEventType(t, observer, "member")
 }
 
@@ -105,6 +123,10 @@ func TestClientPointsValidatesInputAndReportsSessionErrors(t *testing.T) {
 	session.startErr = domain.ErrRoomClosed
 	source.handleInbound([]byte(`{"t":"start"}`))
 	assertErrorCode(t, source, "room_closed")
+
+	session.startErr = domain.ErrRouteInUse
+	source.handleInbound([]byte(`{"t":"start"}`))
+	assertErrorCode(t, source, "route_in_use")
 
 	source.handleInbound([]byte(`{"t":"points","pts":[[43.06,141.35,1761278400000,8.2]]}`))
 	if len(session.points) != 1 {
@@ -132,7 +154,10 @@ func TestClientLeaveClosesActiveRoute(t *testing.T) {
 	registry.Add(observer)
 
 	source.handleLeave()
-	assertEventType(t, observer, "route_end")
+	routeEnd := readEvent(t, observer)
+	if routeEnd["t"] != "route_end" || routeEnd["endedAt"] == nil {
+		t.Fatalf("disconnect route_end missing endedAt: %+v", routeEnd)
+	}
 	assertEventType(t, observer, "member")
 	registry.Remove(source)
 	registry.BroadcastLeave("ROOM01", source.memberID)
