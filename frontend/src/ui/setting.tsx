@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Check, Copy, CheckCircle2, ArrowLeft } from 'lucide-react';
+import { memberColors } from '../lib/member_colors';
 
 // メンバーの型定義
 export interface Member {
@@ -43,20 +44,6 @@ export default function Setting({
   const [selectedColor, setSelectedColor] = useState(initialColor);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
-
-  // 10色（5色×2行）のカラーパレット
-  const colors = [
-    { name: 'グリーン', hex: '#0E7861' },
-    { name: 'オレンジ', hex: '#E67E22' },
-    { name: 'ブルー', hex: '#3498DB' },
-    { name: 'ピンク', hex: '#E91E63' },
-    { name: 'パープル', hex: '#9B59B6' },
-    { name: 'イエロー', hex: '#F1C40F' },
-    { name: 'レッド', hex: '#E74C3C' },
-    { name: 'ターコイズ', hex: '#1ABC9C' },
-    { name: 'インディゴ', hex: '#3F51B5' },
-    { name: 'ライム', hex: '#8BC34A' },
-  ];
 
   const handleCopyInvite = async () => {
     if (!inviteUrl) return;
@@ -176,13 +163,13 @@ export default function Setting({
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-sm font-bold text-gray-900">自分の軌跡カラー</h2>
             <span className="text-xs font-bold px-2.5 py-1 bg-[#EBF5F3] text-[#0E7861] rounded-full">
-              {colors.find(c => c.hex === selectedColor)?.name || 'カスタム'}
+              {memberColors.find(c => c.hex === selectedColor)?.name || 'カスタム'}
             </span>
           </div>
 
           {/* カラーパレット（5色×2行 = 10色） */}
           <div className="grid grid-cols-5 gap-3 mb-4">
-            {colors.map((c) => {
+            {memberColors.map((c) => {
               const isSelected = selectedColor === c.hex;
               return (
                 <button
