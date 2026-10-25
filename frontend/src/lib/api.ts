@@ -1,6 +1,6 @@
 // REST 呼び出し。
 
-import type { AuthSession, Room, RoomMember, User } from './types';
+import type { ActivityHistory, ActivityRecord, AuthSession, Room, RoomMember, User } from './types';
 
 export function parseAuthUser(payload: unknown): User | null {
   if (typeof payload !== 'object' || payload === null || !('user' in payload)) {
@@ -43,6 +43,100 @@ export function getApiErrorMessage(payload: unknown, fallback: string): string {
 export async function getCurrentUser(): Promise<User | null> {
   const session = await getCurrentSession();
   return session?.user ?? null;
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function parseActivityRecord(value: unknown): ActivityRecord | null {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('routeId' in value) ||
+    !('roomCode' in value) ||
+    !('roomTitle' in value) ||
+    !('isPrivate' in value) ||
+    !('memberCount' in value) ||
+    !('startedAt' in value) ||
+    !('endedAt' in value) ||
+    !('meters' in value) ||
+    !('elapsedMs' in value) ||
+    typeof value.routeId !== 'number' ||
+    !Number.isSafeInteger(value.routeId) ||
+    value.routeId <= 0 ||
+    typeof value.roomCode !== 'string' ||
+    typeof value.roomTitle !== 'string' ||
+    typeof value.isPrivate !== 'boolean' ||
+    typeof value.memberCount !== 'number' ||
+    !Number.isSafeInteger(value.memberCount) ||
+    value.memberCount < 1 ||
+    typeof value.startedAt !== 'string' ||
+    Number.isNaN(Date.parse(value.startedAt)) ||
+    (value.endedAt !== null && (typeof value.endedAt !== 'string' || Number.isNaN(Date.parse(value.endedAt)))) ||
+    !isNonNegativeNumber(value.meters) ||
+    !isNonNegativeNumber(value.elapsedMs)
+  ) {
+    return null;
+  }
+
+  return {
+    routeId: value.routeId,
+    roomCode: value.roomCode,
+    roomTitle: value.roomTitle,
+    isPrivate: value.isPrivate,
+    memberCount: value.memberCount,
+    startedAt: value.startedAt,
+    endedAt: value.endedAt,
+    meters: value.meters,
+    elapsedMs: value.elapsedMs,
+  };
+}
+
+export async function getActivityHistory(): Promise<ActivityHistory> {
+  const response = await fetch('/api/activities');
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    throw new Error(getApiErrorMessage(payload, '活動履歴を取得できませんでした'));
+  }
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('summary' in payload) ||
+    !('activities' in payload) ||
+    typeof payload.summary !== 'object' ||
+    payload.summary === null ||
+    !('recordings' in payload.summary) ||
+    !('completed' in payload.summary) ||
+    !('meters' in payload.summary) ||
+    !('elapsedMs' in payload.summary) ||
+    typeof payload.summary.recordings !== 'number' ||
+    !Number.isSafeInteger(payload.summary.recordings) ||
+    payload.summary.recordings < 0 ||
+    typeof payload.summary.completed !== 'number' ||
+    !Number.isSafeInteger(payload.summary.completed) ||
+    payload.summary.completed < 0 ||
+    !isNonNegativeNumber(payload.summary.meters) ||
+    !isNonNegativeNumber(payload.summary.elapsedMs) ||
+    !Array.isArray(payload.activities)
+  ) {
+    throw new Error('サーバーから不正な活動履歴が返されました');
+  }
+
+  const activities = payload.activities.map(parseActivityRecord);
+  if (activities.some((activity) => activity === null)) {
+    throw new Error('サーバーから不正な活動履歴が返されました');
+  }
+
+  return {
+    summary: {
+      recordings: payload.summary.recordings,
+      completed: payload.summary.completed,
+      meters: payload.summary.meters,
+      elapsedMs: payload.summary.elapsedMs,
+    },
+    activities: activities as ActivityRecord[],
+  };
 }
 
 export async function logout(): Promise<void> {
