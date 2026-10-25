@@ -44,12 +44,23 @@ const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) =
             appendSegment([...segment]);
         }
 
-        const unsubscribe = buffer.subscribe(({ segmentIndex, coordinate, startedNewSegment }) => {
-            if (startedNewSegment || !polylines[segmentIndex]) {
-                appendSegment([coordinate]);
+        const unsubscribe = buffer.subscribe((update) => {
+            if (update.type === 'replace') {
+                polylines[update.segmentIndex]?.setLatLngs(update.coordinates);
                 return;
             }
-            polylines[segmentIndex].addLatLng(coordinate);
+            if (update.finalizedSegment) {
+                polylines[update.finalizedSegment.segmentIndex]?.setLatLngs(
+                    update.finalizedSegment.coordinates,
+                );
+            }
+            if (update.startedNewSegment || !polylines[update.segmentIndex]) {
+                appendSegment(update.segmentStartCoordinate
+                    ? [update.segmentStartCoordinate, update.coordinate]
+                    : [update.coordinate]);
+                return;
+            }
+            polylines[update.segmentIndex].addLatLng(update.coordinate);
         });
         polylinesRef.current = polylines;
 

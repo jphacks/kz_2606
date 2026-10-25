@@ -163,13 +163,13 @@ GPSアートは**生データのままだと汚い**。ここが一番効く。
 | タイル | **CARTO dark_matter** | 暗い地図＋蛍光色の線が一番映える |
 | 状態管理 | zustand | 3KB。Redux不要 |
 | スタイル | Tailwind CSS v4 | Viteプラグイン1行。モバイルUIを速く作れる |
-| 間引き | simplify-js | Douglas-Peucker、2KB |
+| 間引き | **自前実装**（`lib/geo.ts` の `simplifyTrackSegment`） | Douglas-Peucker。simplify-js は入れていない（依存を増やさず、度→メートルの換算を自分で握るため）。確定したセグメントだけ間引く |
 | 永続バッファ | idb-keyval | IndexedDBラッパ、600B |
 | QR | qrcode | 部屋コードの共有用。読み取りはOS標準カメラでOK |
 
 ```bash
 npm create vite@latest web -- --template react-ts
-npm i leaflet zustand simplify-js idb-keyval qrcode
+npm i leaflet zustand idb-keyval qrcode
 npm i -D @types/leaflet tailwindcss @tailwindcss/vite
 ```
 
