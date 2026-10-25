@@ -1135,27 +1135,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 onTeamCreated={handleTeamCreated}
               />
             </div>
-            
-            {/* 🗺️ マップ画面へ進むボタン（テスト用） */}
-            <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
-              <button
-                onClick={() => navigateToScreen('before_record')}
-                style={{
-                  width: '100%',
-                  padding: '14px 20px',
-                  background: '#0E7861',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  boxShadow: '0 4px 6px rgba(14, 120, 97, 0.2)'
-                }}
-              >
-                🗺️ マップ画面へ進む（テスト用）
-              </button>
-            </div>
           </div>
         )}
 
