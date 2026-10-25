@@ -275,7 +275,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 ```
 GET  /api/health          → {"ok": true}
 GET  /ws?room={code}      → WebSocket upgrade
-GET  /*                   → 埋め込みSPA（未知パスは index.html）
+GET  /*                   → 埋め込み静的ファイル / SPA（画面パスは index.html。未知のassetと /api・/ws は404）
 ```
 
 ---
