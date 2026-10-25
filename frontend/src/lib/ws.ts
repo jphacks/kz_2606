@@ -65,6 +65,8 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot | null {
       !isRecord(route) ||
       typeof route.id !== 'number' ||
       typeof route.member !== 'number' ||
+      !('endedAt' in route) ||
+      (route.endedAt !== null && typeof route.endedAt !== 'string') ||
       typeof route.meters !== 'number' ||
       typeof route.elapsedMs !== 'number'
     ) {
@@ -73,6 +75,7 @@ export function parseRoomSnapshot(value: unknown): RoomSnapshot | null {
     routes.push({
       id: route.id,
       member: route.member,
+      endedAt: route.endedAt,
       meters: route.meters,
       elapsedMs: route.elapsedMs,
     });

@@ -34,6 +34,7 @@ export interface RoomMember {
 export interface RoomRouteStats {
   id: number;
   member: number;
+  endedAt: string | null;
   meters: number;
   elapsedMs: number;
 }
