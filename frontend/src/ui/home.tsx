@@ -8,6 +8,7 @@ interface HomeProps {
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
   onStartSolo?: () => void;
+  onNavigateToResult?: () => void;
   onTeamCreated?: (room: Room) => void;
   onLogout?: () => void;
   isLoggingOut?: boolean;
@@ -18,6 +19,7 @@ export default function Home({
   onNavigateToLogin,
   onNavigateToRegister,
   onStartSolo,
+  onNavigateToResult,
   onTeamCreated,
   onLogout,
   isLoggingOut = false,
@@ -195,7 +197,7 @@ export default function Home({
 
           {/* 活動履歴を見る ボタン */}
           <button
-            onClick={() => window.location.assign('/result')}
+            onClick={onNavigateToResult}
             className="w-full mt-4 bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex items-center gap-4 active:bg-gray-50 transition cursor-pointer"
           >
             <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">

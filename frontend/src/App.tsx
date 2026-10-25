@@ -331,7 +331,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   stopRecordingRef.current = stopRecording;
 
   useEffect(() => {
-    if (currentScreen !== 'solo_record') {
+    const keepRecordingOnResult = currentScreen === 'result' &&
+      (recordingRef.current || connectingRef.current);
+    if (currentScreen !== 'solo_record' && !keepRecordingOnResult) {
       stopRecordingRef.current();
       setTrackBuffer(new TrackBuffer());
     }
@@ -378,7 +380,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   };
 
   useEffect(() => {
-    if (!isRecording || currentScreen !== 'solo_record') return;
+    if (!isRecording || (currentScreen !== 'solo_record' && currentScreen !== 'result')) return;
 
     // 表示の更新はここだけ。点が増えるたびには再レンダリングしない（仕様9章）
     const updateStats = () => {
@@ -592,6 +594,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 onNavigateToLogin={() => navigateToScreen('login')}
                 onNavigateToRegister={() => navigateToScreen('signin')}
                 onStartSolo={() => navigateToScreen('solo_record')}
+                onNavigateToResult={() => navigateToScreen('result')}
                 onTeamCreated={handleTeamCreated}
               />
             </div>
@@ -634,7 +637,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
         {currentScreen === 'result' && (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            <Result username={user?.username} roomName={roomTitle ?? undefined} />
+            <Result
+              username={user?.username}
+              roomName={roomTitle ?? undefined}
+              onBackToHome={() => navigateToScreen('home')}
+            />
           </div>
         )}
 

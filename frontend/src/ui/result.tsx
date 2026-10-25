@@ -17,9 +17,10 @@ import {
 interface ActivityProps {
   username?: string;
   roomName?: string;
+  onBackToHome?: () => void;
 }
 
-export default function Activity({ username, roomName }: ActivityProps) {
+export default function Activity({ username, roomName, onBackToHome }: ActivityProps) {
   const displayUsername = username?.trim() || null;
   const displayRoomName = roomName?.trim() || 'チーム名未設定';
 
@@ -200,7 +201,7 @@ export default function Activity({ username, roomName }: ActivityProps) {
 
         {/* ホームに戻るボタン */}
         <button
-          onClick={() => window.location.assign('/')}
+          onClick={onBackToHome}
           className="w-full flex items-center justify-center gap-2 text-[#0e7861] font-bold py-3 hover:bg-[#EBF5F3] rounded-xl transition"
         >
           <Home size={18} />
