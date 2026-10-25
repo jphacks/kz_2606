@@ -48,8 +48,14 @@ export default function HistoryMap({ activity, onBack, onDeleted }: HistoryMapPr
     });
   }, [history]);
 
-  const firstPoint = history?.routes.flatMap((route) => route.points)[0];
-  const position: [number, number] = firstPoint ? [firstPoint[0], firstPoint[1]] : [36.578, 136.648];
+  // 選択した履歴の開始地点を優先する。ルーム内の別メンバーのrouteを
+  // 先に描画した場合でも、別の場所を地図の中心にしない。
+  const selectedRoute = history?.routes.find((route) => route.id === activity.routeId);
+  const startPoint = selectedRoute?.points[0] ?? history?.routes
+    .slice()
+    .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt))
+    .flatMap((route) => route.points)[0];
+  const position: [number, number] = startPoint ? [startPoint[0], startPoint[1]] : [36.578, 136.648];
 
   const handleDelete = async () => {
     if (!window.confirm(`「${activity.roomTitle}」のこの記録を削除しますか？`)) return;
