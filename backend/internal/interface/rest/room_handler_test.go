@@ -24,10 +24,75 @@ type testRoomRepository struct {
 	ownerUserIDs      map[string]int64
 	routes            map[string]map[int64]int64
 	activeRoutes      map[string]map[int64]bool
+	activities        map[int64][]domain.Activity
 	nextRoomID        int64
 	nextMemID         int64
 	createCalls       int
 	codeConflictsLeft int
+}
+
+func TestActivitiesReturnsRealRouteStatsForAuthenticatedUser(t *testing.T) {
+	router, repository := newRoomTestRouter()
+	cookie := registerTestUser(t, router, "walker_1")
+	startedAt := time.Date(2026, time.October, 24, 5, 0, 0, 0, time.UTC)
+	endedAt := startedAt.Add(10 * time.Minute)
+	repository.activities[1] = []domain.Activity{
+		{
+			RoomCode:    "ABC234",
+			RoomTitle:   "大通公園を歩く",
+			MemberCount: 3,
+			Route: domain.Route{
+				ID:        12,
+				MemberID:  1,
+				StartedAt: startedAt,
+				EndedAt:   &endedAt,
+				Points: []domain.Point{
+					{Lat: 43.0, Lng: 141.0, TS: startedAt.UnixMilli(), Acc: 5},
+					{Lat: 43.0005936, Lng: 141.0, TS: startedAt.Add(10 * time.Second).UnixMilli(), Acc: 5},
+				},
+			},
+		},
+	}
+
+	response := requestWithCookie(router, httptest.NewRequest(http.MethodGet, "/api/activities", nil), cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("activities response = %d %s", response.Code, response.Body)
+	}
+	var payload struct {
+		Summary    activitySummaryResponse `json:"summary"`
+		Activities []activityResponse      `json:"activities"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Summary.Recordings != 1 || payload.Summary.Completed != 1 {
+		t.Errorf("summary counts = %+v, want one completed recording", payload.Summary)
+	}
+	if payload.Summary.Meters < 65.9 || payload.Summary.Meters > 66.1 {
+		t.Errorf("summary meters = %f, want about 66", payload.Summary.Meters)
+	}
+	if payload.Summary.ElapsedMs != 10*60*1000 {
+		t.Errorf("summary elapsedMs = %d, want 600000", payload.Summary.ElapsedMs)
+	}
+	if len(payload.Activities) != 1 {
+		t.Fatalf("activities = %+v, want one item", payload.Activities)
+	}
+	item := payload.Activities[0]
+	if item.RouteID != 12 || item.RoomCode != "ABC234" || item.RoomTitle != "大通公園を歩く" || item.MemberCount != 3 {
+		t.Errorf("activity = %+v, want persisted route and room details", item)
+	}
+}
+
+func TestActivitiesReturnsEmptyArrayForNewUser(t *testing.T) {
+	router, _ := newRoomTestRouter()
+	cookie := registerTestUser(t, router, "new_user")
+	response := requestWithCookie(router, httptest.NewRequest(http.MethodGet, "/api/activities", nil), cookie)
+	if response.Code != http.StatusOK {
+		t.Fatalf("activities response = %d %s", response.Code, response.Body)
+	}
+	if !strings.Contains(response.Body.String(), `"activities":[]`) {
+		t.Fatalf("activities response = %s, want an empty JSON array", response.Body)
+	}
 }
 
 func TestJoinRoomTrimsDisplayNameBeforePersisting(t *testing.T) {
@@ -116,7 +181,12 @@ func newTestRoomRepository() *testRoomRepository {
 		ownerUserIDs: make(map[string]int64),
 		routes:       make(map[string]map[int64]int64),
 		activeRoutes: make(map[string]map[int64]bool),
+		activities:   make(map[int64][]domain.Activity),
 	}
+}
+
+func (r *testRoomRepository) Activities(_ context.Context, userID int64) ([]domain.Activity, error) {
+	return r.activities[userID], nil
 }
 
 func (r *testRoomRepository) Create(_ context.Context, owner domain.User, code, title string) (domain.Room, domain.Member, error) {

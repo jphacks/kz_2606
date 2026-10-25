@@ -125,6 +125,8 @@ CREATE TABLE IF NOT EXISTS members (
     UNIQUE (room_id, user_id)             -- 1部屋1ユーザー1行
 );
 
+CREATE INDEX IF NOT EXISTS members_user ON members (user_id);
+
 CREATE TABLE IF NOT EXISTS routes (
     id         BIGSERIAL PRIMARY KEY,
     room_id    BIGINT NOT NULL REFERENCES rooms (id) ON DELETE CASCADE,
@@ -134,6 +136,7 @@ CREATE TABLE IF NOT EXISTS routes (
 );
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
+CREATE INDEX IF NOT EXISTS routes_member_started ON routes (member_id, started_at DESC);
 
 -- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
 -- 複数人が同時に start を叩いても2本目が作られない。
@@ -234,6 +237,40 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 - 中身は `userID` と失効時刻を HMAC-SHA256 で署名したもの。**セッションテーブルは作らない**
 - 鍵は `SESSION_SECRET`（env）。**サーバー再起動でログアウトしない**のが開発中に効く
 - 失効の即時無効化はできない。ハッカソンでは割り切る
+
+### 活動履歴
+
+```
+GET /api/activities
+```
+
+ログイン中のユーザー本人が記録した route を、新しい順で返す。集計単位は部屋ではなく
+**route（1回の記録）**。固定のモック値やクライアント内だけの値を履歴表示に使わず、
+Postgres の route・point を正とする。
+
+```json
+{
+  "summary": {
+    "recordings": 1, "completed": 1,
+    "meters": 842.5, "elapsedMs": 600000
+  },
+  "activities": [{
+    "routeId": 12,
+    "roomCode": "KZ26AB", "roomTitle": "大通公園に絵を描く",
+    "isPrivate": false, "memberCount": 3,
+    "startedAt": "2026-10-24T05:00:00Z",
+    "endedAt": "2026-10-24T05:10:00Z",
+    "meters": 842.5, "elapsedMs": 600000
+  }]
+}
+```
+
+- `recordings` は本人の route 数、`completed` はそのうち `ended_at` が入った route 数
+- `summary.meters` / `summary.elapsedMs` は本人の各 route の合計
+- 各項目の距離・時間は6章の `routes[].meters` / `elapsedMs` と同じ算出規則
+- `memberCount` はその部屋のBANされていない現在のメンバー数
+- 記録中の route も含む。その `elapsedMs` はレスポンス生成時点までの値
+- 未ログインは `401 unauthorized`
 
 ### 部屋
 

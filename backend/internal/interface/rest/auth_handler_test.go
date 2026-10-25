@@ -281,6 +281,7 @@ func TestAllProtectedRoutesRequireAuth(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/api/auth/me"},
+		{http.MethodGet, "/api/activities"},
 		{http.MethodPost, "/api/rooms"},
 		{http.MethodPost, "/api/rooms/KZ26AB/join"},
 		{http.MethodPost, "/api/rooms/KZ26AB/close"},

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, LogOut, UserPlus } from 'lucide-react';
 import QRCode from 'qrcode';
 import { buildInviteUrl, createRoom } from '../lib/api';
@@ -7,7 +7,7 @@ import type { Room } from '../lib/types';
 interface HomeProps {
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
-  onStartSolo?: () => void;
+  onStartSolo?: (activityName: string) => void;
   onNavigateToResult?: () => void;
   onTeamCreated?: (room: Room) => void;
   onLogout?: () => void;
@@ -26,6 +26,9 @@ export default function Home({
   username,
 }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSoloModalOpen, setIsSoloModalOpen] = useState(false);
+  const [soloActivityName, setSoloActivityName] = useState('');
+  const [soloNameError, setSoloNameError] = useState('');
   const [teamName, setTeamName] = useState('');
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
@@ -74,6 +77,18 @@ export default function Home({
     } finally {
       setIsCreatingTeam(false);
     }
+  };
+
+  const handleStartSolo = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const activityName = soloActivityName.trim();
+    if (activityName.length < 1 || Array.from(activityName).length > 40) {
+      setSoloNameError('活動名を1〜40文字で入力してください。');
+      return;
+    }
+    setSoloNameError('');
+    setIsSoloModalOpen(false);
+    onStartSolo?.(activityName);
   };
 
   return (
@@ -168,7 +183,10 @@ export default function Home({
           <div className="grid grid-cols-2 gap-4">
             {/* 一人ではじめる ボタン */}
             <button
-              onClick={onStartSolo}
+              onClick={() => {
+                setSoloNameError('');
+                setIsSoloModalOpen(true);
+              }}
               className="bg-white border border-gray-100 p-5 rounded-2xl shadow-sm flex flex-col items-start gap-4 active:bg-gray-50 transition cursor-pointer"
             >
               <div className="bg-[#EBF5F3] p-3 rounded-full text-[#0E7861]">
@@ -205,11 +223,88 @@ export default function Home({
             </div>
             <div className="text-left">
               <h3 className="font-bold text-gray-900 text-sm mb-1">活動履歴を見る</h3>
-              <p className="text-xs text-gray-500">参加回数・距離・時間・完成アート</p>
+              <p className="text-xs text-gray-500">記録回数・距離・時間・最近の活動</p>
             </div>
           </button>
         </div>
       </main>
+
+      <div
+        className={`fixed inset-0 bg-black/40 z-40 transition-opacity duration-300 ${
+          isSoloModalOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={() => setIsSoloModalOpen(false)}
+        aria-hidden={!isSoloModalOpen}
+      />
+
+      <div
+        className={`fixed bottom-0 left-0 right-0 bg-[#FAFAFA] rounded-t-3xl z-50 transform transition-transform duration-300 ease-out flex flex-col max-h-[90vh] ${
+          isSoloModalOpen ? 'translate-y-0' : 'translate-y-full pointer-events-none'
+        }`}
+        aria-hidden={!isSoloModalOpen}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="solo-activity-title"
+      >
+        <div className="w-full flex justify-center pt-3 pb-1">
+          <div className="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+        </div>
+
+        <div className="px-6 pb-[max(2rem,env(safe-area-inset-bottom))] pt-2 overflow-y-auto">
+          <form onSubmit={handleStartSolo}>
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h2 id="solo-activity-title" className="text-xl font-bold text-gray-900 mb-1">
+                  一人で活動をはじめる
+                </h2>
+                <p className="text-sm text-gray-500">今回の活動に名前をつけましょう</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSoloModalOpen(false)}
+                className="p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200 transition cursor-pointer"
+                aria-label="閉じる"
+                tabIndex={isSoloModalOpen ? 0 : -1}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <label htmlFor="solo-activity-name" className="block text-sm font-bold text-gray-800 mb-2">
+              活動名
+            </label>
+            <input
+              id="solo-activity-name"
+              type="text"
+              value={soloActivityName}
+              onChange={(event) => {
+                setSoloActivityName(event.target.value);
+                setSoloNameError('');
+              }}
+              maxLength={40}
+              placeholder="例：朝の公園さんぽ"
+              className="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 mb-2 text-gray-800 outline-none focus:border-[#0E7861]"
+              required
+              tabIndex={isSoloModalOpen ? 0 : -1}
+            />
+            <p className="text-xs text-gray-500 mb-4">1〜40文字</p>
+
+            {soloNameError && (
+              <div role="alert" className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600">
+                {soloNameError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-[#0E7861] text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 active:bg-[#0A5A47] transition shadow-md cursor-pointer"
+              tabIndex={isSoloModalOpen ? 0 : -1}
+            >
+              活動名を決めて進む
+            </button>
+          </form>
+        </div>
+      </div>
 
       {/* --- チーム参加用 ボトムシート（モーダル） --- */}
       <div 

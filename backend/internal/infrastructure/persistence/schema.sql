@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS members (
     UNIQUE (room_id, user_id)             -- 再入室・リロードが冪等になる
 );
 
+CREATE INDEX IF NOT EXISTS members_user ON members (user_id);
+
 -- routes = 1メンバーの1回の記録。記録開始で作り、終了で ended_at を埋める。
 -- 記録開始時に同期で作るので points より必ず先に存在する → 外部キーを張れる。
 CREATE TABLE IF NOT EXISTS routes (
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS routes (
 );
 
 CREATE INDEX IF NOT EXISTS routes_room ON routes (room_id);
+CREATE INDEX IF NOT EXISTS routes_member_started ON routes (member_id, started_at DESC);
 
 -- 部屋の中で記録中（= 編集可）の route は同時に1本だけ。
 -- 複数人が同時に start を叩いても2本目が作られない。仕様: DATA_MODEL.md 7章

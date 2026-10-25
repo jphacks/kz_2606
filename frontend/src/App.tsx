@@ -5,7 +5,7 @@ import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
-import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
+import { buildInviteUrl, getActivityHistory, getCurrentSession, logout } from './lib/api';
 import { defaultMemberColor, normalizeMemberColor } from './lib/member_colors';
 import { shouldAcceptPoint } from './lib/geo';
 import {
@@ -22,7 +22,7 @@ import {
 } from './lib/ws';
 import { drainOutbox, enqueuePoints } from './lib/outbox';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
+import type { ActivityHistory, Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'join';
 const JoinScreen = lazy(() => import('./components/JoinScreen'));
@@ -64,7 +64,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   );
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
-  const [roomTitle, setRoomTitle] = useState<string | null>(null);
+  const [soloActivityName, setSoloActivityName] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   const [otherTracks, setOtherTracks] = useState<RoomRouteTrack[]>([]);
@@ -72,6 +72,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [activityHistory, setActivityHistory] = useState<ActivityHistory | null>(null);
+  const [activityError, setActivityError] = useState('');
+  const [isActivityLoading, setIsActivityLoading] = useState(false);
+  const [activityReloadKey, setActivityReloadKey] = useState(0);
   const [recordingError, setRecordingError] = useState('');
   const [recordingMessage, setRecordingMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -143,7 +147,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (isMounted && authRequestVersion.current === requestVersion) {
           setUser(session?.user ?? null);
           setRoomCode(session?.room.code ?? null);
-          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -170,6 +173,43 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (currentScreen !== 'result') return;
+    if (!sessionLoaded) {
+      setIsActivityLoading(true);
+      return;
+    }
+    if (!user) {
+      setActivityHistory(null);
+      setActivityError('活動履歴を見るにはログインしてください。');
+      setIsActivityLoading(false);
+      return;
+    }
+
+    let isActive = true;
+    setIsActivityLoading(true);
+    setActivityHistory(null);
+    setActivityError('');
+    getActivityHistory()
+      .then((history) => {
+        if (isActive) setActivityHistory(history);
+      })
+      .catch((error: unknown) => {
+        console.error('活動履歴を取得できませんでした:', error);
+        if (isActive) {
+          setActivityHistory(null);
+          setActivityError(error instanceof Error ? error.message : '活動履歴を取得できませんでした');
+        }
+      })
+      .finally(() => {
+        if (isActive) setIsActivityLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [activityReloadKey, currentScreen, sessionLoaded, user]);
 
   useEffect(() => {
     const activeRoomCode = currentScreen === 'solo_record' ||
@@ -450,7 +490,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       .then((session) => {
         if (authRequestVersion.current === requestVersion) {
           setRoomCode(session?.room.code ?? null);
-          setRoomTitle(session?.room.title ?? null);
           setSessionLoaded(true);
         }
       })
@@ -486,7 +525,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       stopRecording();
       setUser(null);
       setRoomCode(null);
-      setRoomTitle(null);
       setTeamRoom(null);
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
@@ -1089,7 +1127,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 isLoggingOut={isLoggingOut}
                 onNavigateToLogin={() => navigateToScreen('login')}
                 onNavigateToRegister={() => navigateToScreen('signin')}
-                onStartSolo={() => navigateToScreen('solo_record')}
+                onStartSolo={(activityName) => {
+                  setSoloActivityName(activityName);
+                  navigateToScreen('solo_record');
+                }}
                 onNavigateToResult={() => navigateToScreen('result')}
                 onTeamCreated={handleTeamCreated}
               />
@@ -1154,9 +1195,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <Result
               username={user?.username}
-              roomName={roomTitle ?? undefined}
+              history={activityHistory}
+              isLoading={isActivityLoading}
+              error={activityError}
               isRecording={isRecording}
               isConnecting={isConnecting}
+              onRetry={() => setActivityReloadKey((value) => value + 1)}
               onBackToHome={() => navigateToScreen('home')}
             />
           </div>
@@ -1193,7 +1237,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               <BeforeRecord 
                 hasLocation={hasLocation} 
                 mode={currentScreen === 'solo_record' ? 'solo' : 'team'}
-                teamName={roomSnapshot?.room.title}
+                teamName={currentScreen === 'solo_record' ? soloActivityName ?? undefined : roomSnapshot?.room.title}
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
                 roomClosed={Boolean(roomSnapshot?.room.closedAt)}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { joinRoom } from './api';
+import { getActivityHistory, joinRoom } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -56,5 +56,52 @@ describe('joinRoom', () => {
 
     await expect(joinRoom('KZ26AB', 'Guest', '#0E7861'))
       .rejects.toThrow('サーバーから不正な参加情報が返されました');
+  });
+});
+
+describe('getActivityHistory', () => {
+  it('parses real activity summary and route records', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      summary: { recordings: 1, completed: 1, meters: 65.98, elapsedMs: 600_000 },
+      activities: [{
+        routeId: 12,
+        roomCode: 'ABC234',
+        roomTitle: '大通公園を歩く',
+        isPrivate: false,
+        memberCount: 3,
+        startedAt: '2026-10-24T05:00:00Z',
+        endedAt: '2026-10-24T05:10:00Z',
+        meters: 65.98,
+        elapsedMs: 600_000,
+      }],
+    }), { status: 200 })));
+
+    const history = await getActivityHistory();
+
+    expect(fetch).toHaveBeenCalledWith('/api/activities');
+    expect(history.summary).toEqual({
+      recordings: 1,
+      completed: 1,
+      meters: 65.98,
+      elapsedMs: 600_000,
+    });
+    expect(history.activities[0]).toMatchObject({ routeId: 12, roomTitle: '大通公園を歩く' });
+  });
+
+  it('surfaces the server error message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: { code: 'internal_error', message: '活動履歴を取得できませんでした' },
+    }), { status: 500 })));
+
+    await expect(getActivityHistory()).rejects.toThrow('活動履歴を取得できませんでした');
+  });
+
+  it('rejects malformed activity values', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      summary: { recordings: 1, completed: 1, meters: 10, elapsedMs: 1000 },
+      activities: [{ routeId: 1, meters: '10' }],
+    }), { status: 200 })));
+
+    await expect(getActivityHistory()).rejects.toThrow('サーバーから不正な活動履歴が返されました');
   });
 });
