@@ -29,6 +29,13 @@ import type { ActivityHistory, Point, Room, RoomMember, RoomRouteTrack, RoomSnap
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'join';
 const JoinScreen = lazy(() => import('./components/JoinScreen'));
 
+interface RemoteRouteMeta {
+  memberId: number;
+  memberName: string;
+  color: string;
+  active: boolean;
+}
+
 function formatRouteElapsedTime(milliseconds: number): string {
   const totalMinutes = Math.floor(milliseconds / 60_000);
   const hours = Math.floor(totalMinutes / 60);
@@ -93,6 +100,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [hasRecorded, setHasRecorded] = useState(false);
   const authRequestVersion = useRef(0);
   const otherTracksRef = useRef(new Map<number, RoomRouteTrack>());
+  const remoteRouteMetaRef = useRef(new Map<number, RemoteRouteMeta>());
+  const pendingRemotePointsRef = useRef(new Map<number, Point[]>());
   const activeTrackBufferRef = useRef<TrackBuffer | null>(null);
   const activeRouteIdRef = useRef<number | null>(null);
   const activeRouteMemberIdRef = useRef<number | null>(null);
@@ -136,7 +145,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     otherTracksRef.current.set(routeId, {
       routeId,
       memberId,
+      memberName: remoteRouteMetaRef.current.get(routeId)?.memberName,
       color: activeRouteColorRef.current,
+      active: false,
+      lastPoint: buffer.lastCoordinate ?? undefined,
       buffer,
     });
     setOtherTracks([...otherTracksRef.current.values()]);
@@ -234,6 +246,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     if (!sessionLoaded || !activeRoomCode || !isRoomScreen) {
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
+      remoteRouteMetaRef.current.clear();
+      pendingRemotePointsRef.current.clear();
       setOtherTracks([]);
       setRoomDataError('');
       return;
@@ -243,6 +257,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     let myMemberId: number | null = null;
     setRoomSnapshot(null);
     otherTracksRef.current.clear();
+    remoteRouteMetaRef.current.clear();
+    pendingRemotePointsRef.current.clear();
     setOtherTracks([]);
     setRoomDataError('');
     let socket: WebSocket;
@@ -293,21 +309,37 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         syncOwnMemberColor(snapshot);
         otherTracksRef.current.clear();
         for (const route of snapshot.routes) {
-          // The active route is drawn locally; render ended routes from the snapshot.
-          if (route.member === myMemberId && route.endedAt === null) continue;
           const member = snapshot.members.find((current) => current.id === route.member);
           if (!member || member.banned) continue;
+          remoteRouteMetaRef.current.set(route.id, {
+            memberId: route.member,
+            memberName: member.displayName,
+            color: member.color,
+            active: route.endedAt === null,
+          });
+          // 自分の進行中 route はGPSバッファをローカルで描画する。
+          if (route.member === myMemberId && route.endedAt === null) continue;
           const buffer = new TrackBuffer();
-          for (const point of routePoints.get(route.id) ?? []) {
+          const snapshotPoints = routePoints.get(route.id) ?? [];
+          for (const point of snapshotPoints) {
             buffer.add(point);
           }
+          if (snapshotPoints.length === 0) {
+            for (const point of pendingRemotePointsRef.current.get(route.id) ?? []) {
+              buffer.add(point);
+            }
+          }
+          pendingRemotePointsRef.current.delete(route.id);
           if (route.endedAt !== null) {
             buffer.finalize();
           }
           otherTracksRef.current.set(route.id, {
             routeId: route.id,
             memberId: route.member,
+            memberName: member.displayName,
             color: member.color,
+            active: route.endedAt === null,
+            lastPoint: buffer.lastCoordinate ?? undefined,
             buffer,
           });
         }
@@ -325,15 +357,30 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           activeRouteMemberIdRef.current = route.member;
           activeRouteColorRef.current = route.color;
         }
+        const current = otherTracksRef.current.get(route.id);
+        const existingMeta = remoteRouteMetaRef.current.get(route.id);
+        remoteRouteMetaRef.current.set(route.id, {
+          memberId: route.member,
+          memberName: existingMeta?.memberName ?? current?.memberName ?? `メンバー ${route.member}`,
+          color: route.color,
+          active: true,
+        });
         if (route.member !== myMemberId) {
-          const current = otherTracksRef.current.get(route.id);
+          const buffer = current?.buffer ?? new TrackBuffer();
+          for (const point of pendingRemotePointsRef.current.get(route.id) ?? []) {
+            buffer.add(point);
+          }
+          pendingRemotePointsRef.current.delete(route.id);
           otherTracksRef.current.set(route.id, current
-            ? { ...current, color: route.color }
+            ? { ...current, color: route.color, active: true, lastPoint: buffer.lastCoordinate ?? current.lastPoint, buffer }
             : {
               routeId: route.id,
               memberId: route.member,
+              memberName: existingMeta?.memberName ?? `メンバー ${route.member}`,
               color: route.color,
-              buffer: new TrackBuffer(),
+              active: true,
+              lastPoint: buffer.lastCoordinate ?? undefined,
+              buffer,
             });
           setOtherTracks([...otherTracksRef.current.values()]);
         }
@@ -363,9 +410,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setUserColor(ownColor);
           activeRouteColorRef.current = ownColor;
         }
+        for (const [routeId, meta] of remoteRouteMetaRef.current) {
+          if (meta.memberId === member.id) {
+            remoteRouteMetaRef.current.set(routeId, { ...meta, memberName: member.displayName, color: member.color });
+          }
+        }
         for (const [routeId, track] of otherTracksRef.current) {
           if (track.memberId === member.id && track.color !== member.color) {
-            otherTracksRef.current.set(routeId, { ...track, color: member.color });
+            otherTracksRef.current.set(routeId, { ...track, memberName: member.displayName, color: member.color });
+          } else if (track.memberId === member.id && track.memberName !== member.displayName) {
+            otherTracksRef.current.set(routeId, { ...track, memberName: member.displayName });
           }
         }
         setOtherTracks([...otherTracksRef.current.values()]);
@@ -382,11 +436,29 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           console.error('サーバーから不正な軌跡データが返されました:', message);
           return;
         }
-        const track = otherTracksRef.current.get(points.routeId);
-        if (!track) return;
+        let track = otherTracksRef.current.get(points.routeId);
+        if (!track) {
+          const meta = remoteRouteMetaRef.current.get(points.routeId);
+          if (!meta) {
+            const pending = pendingRemotePointsRef.current.get(points.routeId) ?? [];
+            pendingRemotePointsRef.current.set(points.routeId, [...pending, ...points.points]);
+            return;
+          }
+          track = {
+            routeId: points.routeId,
+            memberId: meta.memberId,
+            memberName: meta.memberName,
+            color: meta.color,
+            active: meta.active,
+            buffer: new TrackBuffer(),
+          };
+          otherTracksRef.current.set(points.routeId, track);
+        }
         for (const point of points.points) {
           track.buffer.add(point);
         }
+        track.lastPoint = track.buffer.lastCoordinate ?? track.lastPoint;
+        setOtherTracks([...otherTracksRef.current.values()]);
       } else if (message.t === 'leave' && 'member' in message && typeof message.member === 'number') {
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -415,7 +487,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (routeEnd.memberId === myMemberId && activeRouteIdRef.current === routeEnd.routeId) {
           preserveActiveTrack();
         } else {
-          otherTracksRef.current.get(routeEnd.routeId)?.buffer.finalize();
+          const track = otherTracksRef.current.get(routeEnd.routeId);
+          track?.buffer.finalize();
+          if (track) {
+            otherTracksRef.current.set(routeEnd.routeId, { ...track, active: false });
+            setOtherTracks([...otherTracksRef.current.values()]);
+          }
+        }
+        const routeMeta = remoteRouteMetaRef.current.get(routeEnd.routeId);
+        if (routeMeta) {
+          remoteRouteMetaRef.current.set(routeEnd.routeId, { ...routeMeta, active: false });
         }
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -435,6 +516,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         }) : snapshot);
       } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
         otherTracksRef.current.delete(message.route);
+        remoteRouteMetaRef.current.delete(message.route);
+        pendingRemotePointsRef.current.delete(message.route);
         setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,

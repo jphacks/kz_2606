@@ -77,6 +77,9 @@ export type Point = [lat: number, lng: number, ts: number, acc: number];
 export interface RoomRouteTrack {
   routeId: number;
   memberId: number;
+  memberName?: string;
   color: string;
+  active: boolean;
+  lastPoint?: [number, number];
   buffer: import('./track_buffer').TrackBuffer;
 }

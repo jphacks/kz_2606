@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import QRCode from 'qrcode';
@@ -147,7 +147,14 @@ export default function Map({
         )}
         {trackBuffer && <TrackLayer buffer={trackBuffer} color={trackColor} />}
         {otherTracks.map((track) => (
-            <TrackLayer key={track.routeId} buffer={track.buffer} color={track.color} />
+            <Fragment key={track.routeId}>
+              <TrackLayer buffer={track.buffer} color={track.color} />
+              {track.active && track.lastPoint && (
+                <Marker key={`${track.routeId}-marker`} position={track.lastPoint}>
+                  <Popup>{track.memberName ?? `メンバー ${track.memberId}`}</Popup>
+                </Marker>
+              )}
+            </Fragment>
         ))}
         <RecenterMap center={position} />
         </MapContainer>
