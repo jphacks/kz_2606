@@ -453,6 +453,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1 }}>
               <Home
+                key={user?.username ?? 'anonymous'}
                 username={user?.username}
                 onLogout={handleLogout}
                 isLoggingOut={isLoggingOut}
