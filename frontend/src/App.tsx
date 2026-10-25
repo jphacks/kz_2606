@@ -5,7 +5,7 @@ import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
-import { buildInviteUrl, getCurrentSession } from './lib/api';
+import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
 import { shouldAcceptPoint } from './lib/geo';
 import { connectToRoom, flushIntervalMilliseconds, parseRoomMember, parseRoomSnapshot, sendPoints, sendStart, sendStop } from './lib/ws';
 import { TrackBuffer } from './lib/track_buffer';
@@ -44,6 +44,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   const [roomDataError, setRoomDataError] = useState('');
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [authError, setAuthError] = useState('');
   const [recordingError, setRecordingError] = useState('');
   const [recordingMessage, setRecordingMessage] = useState('');
@@ -261,6 +262,35 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
   const handleTeamCreated = (room: Room) => {
     setTeamRoom(room);
+  };
+
+  const handleLogout = async () => {
+    const requestVersion = ++authRequestVersion.current;
+    setIsLoggingOut(true);
+    setAuthError('');
+    try {
+      await logout();
+      if (authRequestVersion.current !== requestVersion) return;
+      stopRecording();
+      setUser(null);
+      setRoomCode(null);
+      setRoomTitle(null);
+      setTeamRoom(null);
+      setRoomSnapshot(null);
+      setRoomDataError('');
+      setSessionLoaded(true);
+      setRecordingError('');
+      setRecordingMessage('');
+      setTrackBuffer(new TrackBuffer());
+      navigateToScreen('home', true);
+    } catch (err) {
+      console.error('ログアウトに失敗しました:', err);
+      setAuthError(err instanceof Error ? err.message : 'ログアウトに失敗しました');
+    } finally {
+      if (authRequestVersion.current === requestVersion) {
+        setIsLoggingOut(false);
+      }
+    }
   };
 
   const stopRecording = () => {
@@ -555,7 +585,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <div style={{ flex: 1 }}>
               <Home
+                key={user?.username ?? 'anonymous'}
                 username={user?.username}
+                onLogout={handleLogout}
+                isLoggingOut={isLoggingOut}
                 onNavigateToLogin={() => navigateToScreen('login')}
                 onNavigateToRegister={() => navigateToScreen('signin')}
                 onStartSolo={() => navigateToScreen('solo_record')}

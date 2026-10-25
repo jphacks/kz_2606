@@ -65,12 +65,9 @@ CREATE INDEX ON points (room_id, member_id, recorded_at);
 
 ### 書き込み方の注意
 
-1点ごとにINSERTしない。
-
-1. クライアントで3〜5秒ぶんバッチにまとめる
-2. WebSocketで送信
-3. サーバーは**まず全員にブロードキャスト**（体感速度を稼ぐ）
-4. その後まとめて bulk insert
+1点ごとにINSERTしない。クライアントで3秒ごとにバッチ化してWebSocketで送り、サーバーは
+Postgresのトランザクション内で `CopyFrom` によって保存する。**保存成功後に他の参加者へ
+ブロードキャスト**するため、通知された点はsnapshotからも復元できる。
 
 ---
 
@@ -216,22 +213,24 @@ go mod init github.com/<you>/gpsart
 go get github.com/gorilla/websocket github.com/jackc/pgx/v5
 ```
 
-### 7.4 設計の中心：ルーム単位のインメモリHub
+### 7.4 記録データの永続化と接続管理
 
-**インメモリHubを真実のソース**にして、Postgresは「後追いの保存先」に徹させる。
+現在の実装では **Postgresを永続データと記録状態の真実のソース**にする。ルーム単位の
+インメモリHub/actorは設けず、記録操作はDBトランザクションで直列化する。
 
 ```
-Hub (map[roomID]*Room)
- └ Room
-    ├ clients  map[*Client]bool
-    ├ tracks   map[memberID][]Point   ← メモリ上の現在の絵
-    ├ register / unregister / broadcast chan
-    └ flushTicker (5s) → pgx CopyFrom
+Postgres
+ ├ rooms / members / routes / points   ← 永続データとsnapshotの読み出し元
+ └ routes_one_recording_per_room       ← 部屋内のactive routeを1本に制限
+
+Registry (map[roomCode]set[*client])
+ └ WebSocket接続のみ管理。複数タブとオンライン状態を扱う
 ```
 
-- `join` が来たら `tracks` をまるごと `snapshot` で返す（DBを読まない＝速い）
-- `points` が来たら **即ブロードキャスト** → `tracks` に追記 → 5秒ごとにまとめてDBへ
-- サーバー再起動時だけDBから `tracks` を復元
+- 接続時の `snapshot` はPostgresから取得する
+- `start` / `points` / `stop` はルーム行をロックする。部屋全体で同時に記録できるrouteは1本
+- `points` は1メッセージ最大500点を `CopyFrom` で保存し、成功後に送信者以外へブロードキャスト
+- 最後の接続が切れた時は、記録中routeを終了するDB処理を非同期で行う
 
 ### 7.5 リポジトリ構成とデプロイ
 

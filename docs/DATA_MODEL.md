@@ -19,7 +19,7 @@
 | ID | すべて `BIGSERIAL`（int64）。JSONでは**数値**で送る |
 | 状態フラグ | boolean ではなく `*_at TIMESTAMPTZ` の NULL / 非NULL で表す |
 | JSONキー | 点列だけ短縮（`pts`）。他は読みやすさ優先の camelCase |
-| 真実のソース | **サーバーのメモリ**。DBは後追いの保存先 |
+| 真実のソース | **Postgres**。route・point はトランザクションで保存し、snapshot も DB から読む |
 | 認証 | **ログイン必須。** 匿名参加は現時点では無し（12章に拡張方針） |
 
 > JSONの数値は JavaScript で `2^53` までしか安全に扱えないが、`BIGSERIAL` の連番が
@@ -480,41 +480,35 @@ recording（ended_at IS NULL） ──stop──> ended
 
 ---
 
-## 8. サーバー内メモリ構造
+## 8. サーバー内のセッション・接続管理
 
-```go
-Hub
- ├ rooms   map[domain.RoomCode]*Room   // mutexで保護
- └ repos                               // usecase の port 経由
+現在の実装では、route と point の永続データは Postgres に保持する。ルームの軌跡を保持する
+インメモリHubやactorは使わず、`start`・`points`・`stop` の各操作はルーム行をロックする
+トランザクション内で処理する。点はバッチで `CopyFrom` し、保存が成功してから他の接続へ通知する。
+新規接続時のsnapshotもDBから読み込む。
 
-Room                          // 全フィールドは run() の goroutine が単独所有
- ├ ID, Code, Title            int64 / RoomCode / string
- ├ OwnerUserID                int64
- ├ ClosedAt                   *time.Time
- ├ Members  map[int64]Member  // memberID → Member
- ├ Routes   map[int64]*Route  // routeID  → Route{ID, MemberID, Points, EndedAt}
- ├ Active   map[int64]int64   // memberID → 進行中の routeID（記録中の判定）
- ├ cmds     chan func(*Room)  // 外部からはクロージャを送り込む（actorパターン）
- └ pending  map[int64][]Point // routeID → DB未書き込み分
+```text
+Postgres
+ ├ rooms / members / routes / points   永続データと記録状態
+ └ routes_one_recording_per_room       部屋内の記録中routeを1本に制限
 
-Registry                      // interface/ws。usecase.Notifier の実装
- └ conns   map[RoomCode]map[*client]bool
+Registry                              interface/ws
+ └ conns map[roomCode]map[*client]struct{}  接続と複数タブの管理のみ
 
 client
- ├ conn    *websocket.Conn
- ├ out     chan []byte        // 容量64。溢れたら切断
- ├ memberID int64
- └ dead    bool               // Room goroutine からのみ触る
+ ├ conn       *websocket.Conn
+ ├ out        chan []byte              容量64。溢れたら切断
+ ├ memberID   int64                    Cookieで認証したmember
+ └ onLeave    func()                   最後の接続が切れた際にrouteを閉じる
 ```
 
-### 守るべき不変条件
+### 操作と不変条件
 
-1. **`Room` のフィールドは `run()` goroutine 以外から触らない。** 外からは `r.do(func(r *Room){...})`
-2. `Routes[].Points` と `pending` は同じ点を持つ。`pending` だけが flush でクリアされる
-3. `Active` に入っていないメンバーからの `points` は拒否する（`no_active_route`）
-4. 同一 `memberID` の接続が複数ありうる（複数タブ）。`leave` は最後の1つが切れたときだけ送る
-5. DB書き込み（`PointRepository.Save` など）は goroutine に逃がす。`run()` をブロックさせない
-6. `snapshot` は `Room.Clone()` のコピーを返す。実体を外に出さない
+1. `start` / `points` / `stop` は同じ部屋行の `FOR UPDATE` ロックを取る。記録開始時に部屋内のactive routeを調べ、二重開始は `route_in_use` で拒否する。部分ユニーク索引も最後の防衛線として維持する。
+2. `points` は現在のmemberのactive routeにだけ追加する。routeが無ければ `no_active_route` を返す。
+3. 点列は1メッセージ500点以下。1回のバッチ保存が成功した後に限り、送信者以外へ `points` を配信する。送信者は自分の線をローカルで描画する。
+4. 同一 `memberID` の接続が複数ありうる（複数タブ）。最後の接続が切れた時だけ `leave` を通知し、記録中routeがあれば終了する。この後処理は他接続への配信をブロックしないよう非同期で行う。
+5. `snapshot` はDBから読み込む。インメモリのroute/point複製や定期flushとの整合性管理は行わない。
 
 ---
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, UserPlus } from 'lucide-react';
+import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, LogOut, UserPlus } from 'lucide-react';
 import QRCode from 'qrcode';
 import { buildInviteUrl, createRoom } from '../lib/api';
 import type { Room } from '../lib/types';
@@ -9,6 +9,8 @@ interface HomeProps {
   onNavigateToRegister?: () => void;
   onStartSolo?: () => void;
   onTeamCreated?: (room: Room) => void;
+  onLogout?: () => void;
+  isLoggingOut?: boolean;
   username?: string;
 }
 
@@ -17,6 +19,8 @@ export default function Home({
   onNavigateToRegister,
   onStartSolo,
   onTeamCreated,
+  onLogout,
+  isLoggingOut = false,
   username,
 }: HomeProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -85,7 +89,19 @@ export default function Home({
         {/* 右側のエリア：認証状態 ＆ 使い方 */}
         <div className="flex items-center gap-3">
           {username ? (
-            <span className="text-xs font-bold text-[#0E7861]">{username}</span>
+            <>
+              <span className="text-xs font-bold text-[#0E7861]">{username}</span>
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  disabled={isLoggingOut}
+                  className="bg-[#0E7861]/10 hover:bg-[#0E7861]/20 disabled:opacity-60 text-[#0E7861] border border-[#0E7861]/30 text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer disabled:cursor-wait"
+                >
+                  <LogOut size={14} />
+                  <span>{isLoggingOut ? 'ログアウト中...' : 'ログアウト'}</span>
+                </button>
+              )}
+            </>
           ) : (
             <>
               {onNavigateToLogin && (
