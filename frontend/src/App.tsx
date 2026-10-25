@@ -1117,7 +1117,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   useEffect(() => {
     if (
       !isRecording ||
-      (currentScreen !== 'solo_record' && currentScreen !== 'result' && currentScreen !== 'setting')
+      (currentScreen !== 'before_record' && currentScreen !== 'solo_record' &&
+        currentScreen !== 'result' && currentScreen !== 'setting')
     ) return;
 
     // 表示の更新はここだけ。点が増えるたびには再レンダリングしない（仕様9章）
