@@ -75,6 +75,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const activeRouteIdRef = useRef<number | null>(null);
   const activeRouteMemberIdRef = useRef<number | null>(null);
   const activeRouteColorRef = useRef(userColor);
+  const preservedMetersRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
@@ -98,6 +99,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     const memberId = activeRouteMemberIdRef.current;
     if (routeId === null || !buffer || memberId === null) return;
 
+    preservedMetersRef.current += buffer.totalMeters;
     otherTracksRef.current.set(routeId, {
       routeId,
       memberId,
@@ -739,7 +741,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             return;
           }
           routeIdRef.current = activeRoute.id;
-          activeTrackBufferRef.current = buffer;
+          const activeBuffer = activeRouteIdRef.current === null ? new TrackBuffer() : buffer;
+          if (activeBuffer !== buffer) {
+            recordingBufferRef.current = activeBuffer;
+            setTrackBuffer(activeBuffer);
+          }
+          activeTrackBufferRef.current = activeBuffer;
           activeRouteIdRef.current = activeRoute.id;
           activeRouteMemberIdRef.current = activeRoute.member;
           activeRouteColorRef.current = activeRoute.color;
@@ -754,7 +761,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setIsRecording(true);
           setIsConnecting(false);
           setRecordingMessage('位置情報を記録してサーバーへ送信中です');
-          startLocationWatch(buffer);
+          startLocationWatch(activeBuffer);
           void resumeActiveRoute(socket, room, activeRoute.id);
           return;
         }
@@ -899,7 +906,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       if (recordingStartedAtRef.current !== null) {
         setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
       }
-      setDistanceTravelled(trackBuffer.totalMeters);
+      setDistanceTravelled(preservedMetersRef.current + trackBuffer.totalMeters);
     };
     updateStats();
     const statsTimerId = window.setInterval(updateStats, 1000);
@@ -951,6 +958,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     setRecordingError('');
     setRecordingMessage('サーバーに接続しています...');
     const buffer = new TrackBuffer();
+    preservedMetersRef.current = 0;
     recordingBufferRef.current = buffer;
     activeTrackBufferRef.current = buffer;
     activeRouteIdRef.current = null;
