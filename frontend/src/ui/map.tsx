@@ -19,14 +19,22 @@ const RecenterMap = ({ center }: { center: [number, number] }) => {
 // 一括投入は setLatLngs / 増分は addLatLng（仕様: DATA_MODEL.md 9章）
 const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) => {
     const map = useMap();
+    const colorRef = useRef(color);
     const polylinesRef = useRef<L.Polyline[]>([]);
+
+    useEffect(() => {
+        colorRef.current = color;
+        for (const polyline of polylinesRef.current) {
+            polyline.setStyle({ color });
+        }
+    }, [color]);
 
     useEffect(() => {
         const group = L.layerGroup().addTo(map);
         const polylines: L.Polyline[] = [];
 
         const appendSegment = (coordinates: [number, number][]) => {
-            const polyline = L.polyline(coordinates, { color, weight: 5 }).addTo(group);
+            const polyline = L.polyline(coordinates, { color: colorRef.current, weight: 5 }).addTo(group);
             polylines.push(polyline);
             return polyline;
         };
@@ -51,12 +59,6 @@ const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) =
             polylinesRef.current = [];
         };
     }, [buffer, map]);
-
-    useEffect(() => {
-        for (const polyline of polylinesRef.current) {
-            polyline.setStyle({ color });
-        }
-    }, [color]);
 
     return null;
 };

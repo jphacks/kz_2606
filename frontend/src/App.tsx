@@ -174,7 +174,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         myMemberId = snapshot.you.id;
         otherTracksRef.current.clear();
         for (const route of snapshot.routes) {
-          if (route.member === myMemberId) continue;
+          // The active route is drawn locally; render ended routes from the snapshot.
+          if (route.member === myMemberId && route.endedAt === null) continue;
           const member = snapshot.members.find((current) => current.id === route.member);
           if (!member || member.banned) continue;
           const buffer = new TrackBuffer();
