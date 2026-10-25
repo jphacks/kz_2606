@@ -1,6 +1,6 @@
 // REST 呼び出し。
 
-import type { AuthSession, Room, User } from './types';
+import type { AuthSession, Room, RoomMember, User } from './types';
 
 export function parseAuthUser(payload: unknown): User | null {
   if (typeof payload !== 'object' || payload === null || !('user' in payload)) {
@@ -154,6 +154,53 @@ export async function createRoom(title: string): Promise<Room> {
   }
 
   return room;
+}
+
+/** 招待された部屋へ参加する（仕様5章） */
+export async function joinRoom(
+  roomCode: string,
+  displayName: string,
+  color: string,
+): Promise<{ room: Room; member: Pick<RoomMember, 'id' | 'displayName' | 'color'> }> {
+  const response = await fetch(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName: displayName.trim(), color }),
+  });
+
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    throw new Error(getApiErrorMessage(payload, '部屋に参加できませんでした'));
+  }
+
+  const room = parseRoom(payload);
+  if (
+    !room ||
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('member' in payload) ||
+    typeof payload.member !== 'object' ||
+    payload.member === null ||
+    !('id' in payload.member) ||
+    !('displayName' in payload.member) ||
+    !('color' in payload.member) ||
+    typeof payload.member.id !== 'number' ||
+    typeof payload.member.displayName !== 'string' ||
+    typeof payload.member.color !== 'string' ||
+    !/^#[0-9a-fA-F]{6}$/.test(payload.member.color) ||
+    room.code.toUpperCase() !== roomCode.toUpperCase()
+  ) {
+    throw new Error('サーバーから不正な参加情報が返されました');
+  }
+
+  return {
+    room,
+    member: {
+      id: payload.member.id,
+      displayName: payload.member.displayName,
+      color: payload.member.color,
+    },
+  };
 }
 
 /** 招待URL。QRにもリンクにもこれを使う（仕様10章 `?room=<CODE>`） */

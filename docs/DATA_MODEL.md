@@ -250,7 +250,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 ```
 
 - `POST /api/rooms` は**レスポンスに `code` を含める**。作成者は即QRを出す必要がある
-- 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭）
+- 作成者は自動で member になる（`displayName` は `username`、色はパレットの先頭 `#0e7861`）
 - 個人ルームは `isPrivate: true`。本人以外のjoinおよびWS接続を拒否する
 - `GET /api/rooms/{code}` は存在確認だけ。**軌跡は返さない**（それは `snapshot` の仕事）
 - `POST .../join` は**冪等**。すでに参加済みなら既存の member を返す
@@ -342,16 +342,16 @@ GET /ws?room=KZ26AB
   },
   "you": { "id": 3, "displayName": "たろう", "color": "#ff2d78", "isOwner": false },
   "members": [
-    { "id": 1, "displayName": "はなこ", "color": "#00e5ff", "online": true,  "banned": false, "recording": true  },
+    { "id": 1, "displayName": "はなこ", "color": "#0e7861", "online": true,  "banned": false, "recording": true  },
     { "id": 3, "displayName": "たろう", "color": "#ff2d78", "online": true,  "banned": false, "recording": false },
     { "id": 5, "displayName": "じろう", "color": "#ffe600", "online": false, "banned": true,  "recording": false }
   ],
   "routes": [
-    { "id": 12, "member": 1, "color": "#00e5ff",
+    { "id": 12, "member": 1, "color": "#0e7861",
       "startedAt": "2026-10-24T05:00:00Z", "endedAt": "2026-10-24T05:10:00Z",
       "meters": 842.5, "elapsedMs": 600000,
       "pts": [[43.0607,141.3544,1761278400000,8.2]] },
-    { "id": 14, "member": 1, "color": "#00e5ff",
+    { "id": 14, "member": 1, "color": "#0e7861",
       "startedAt": "2026-10-24T05:30:00Z", "endedAt": null,
       "meters": 0, "elapsedMs": 1800000,
       "pts": [] }

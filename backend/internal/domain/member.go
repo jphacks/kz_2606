@@ -14,7 +14,7 @@ var (
 	ErrInvalidColor       = errors.New("invalid color")
 )
 
-const FirstMemberColor = "#00e5ff"
+const FirstMemberColor = "#0e7861"
 
 var memberColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 

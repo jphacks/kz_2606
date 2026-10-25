@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import Home from './ui/home';
 import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
@@ -6,6 +6,7 @@ import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
 import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
+import { defaultMemberColor, normalizeMemberColor } from './lib/member_colors';
 import { shouldAcceptPoint } from './lib/geo';
 import {
   connectToRoom,
@@ -21,9 +22,10 @@ import {
 } from './lib/ws';
 import { drainOutbox, enqueuePoints } from './lib/outbox';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, Room, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
+import type { Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
-type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
+type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'join';
+const JoinScreen = lazy(() => import('./components/JoinScreen'));
 
 function formatRouteElapsedTime(milliseconds: number): string {
   const totalMinutes = Math.floor(milliseconds / 60_000);
@@ -32,23 +34,34 @@ function formatRouteElapsedTime(milliseconds: number): string {
   return hours > 0 ? `${hours}時間${minutes}分` : `${minutes}分`;
 }
 
-function getScreenFromPath(path: string): Screen {
+function getScreenFromPath(path: string, hasInviteRoom: boolean): Screen {
   if (path === '/login') return 'login';
   if (path === '/signin') return 'signin';
   if (path === '/solo') return 'solo_record';
   if (path === '/result') return 'result';
+  if (hasInviteRoom) return 'join';
   return 'home';
 }
 
 export default function App() {
-  return <MainExperience initialScreen={getScreenFromPath(window.location.pathname)} />;
+  return (
+    <MainExperience
+      initialScreen={getScreenFromPath(
+        window.location.pathname,
+        new URLSearchParams(window.location.search).has('room'),
+      )}
+    />
+  );
 }
 
 function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
-  const [userColor, setUserColor] = useState('#0E7861'); // 選択した軌跡カラー
+  const [userColor, setUserColor] = useState<string>(defaultMemberColor);
+  const [inviteRoomCode, setInviteRoomCode] = useState(
+    () => new URLSearchParams(window.location.search).get('room')?.trim().toUpperCase() ?? null,
+  );
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [roomTitle, setRoomTitle] = useState<string | null>(null);
@@ -92,6 +105,14 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const connectingRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stopRecordingRef = useRef<() => void>(() => {});
+
+  const syncOwnMemberColor = (snapshot: RoomSnapshot) => {
+    const ownMember = snapshot.members.find((member) => member.id === snapshot.you.id);
+    if (!ownMember) return;
+    const ownColor = normalizeMemberColor(ownMember.color);
+    setUserColor(ownColor);
+    activeRouteColorRef.current = ownColor;
+  };
 
   const preserveActiveTrack = () => {
     const routeId = activeRouteIdRef.current;
@@ -206,6 +227,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           return;
         }
         myMemberId = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
         otherTracksRef.current.clear();
         for (const route of snapshot.routes) {
           // The active route is drawn locally; render ended routes from the snapshot.
@@ -272,6 +294,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (!member) {
           console.error('サーバーから不正なメンバー情報が返されました:', message);
           return;
+        }
+        if (member.id === myMemberId) {
+          const ownColor = normalizeMemberColor(member.color);
+          setUserColor(ownColor);
+          activeRouteColorRef.current = ownColor;
         }
         for (const [routeId, track] of otherTracksRef.current) {
           if (track.memberId === member.id && track.color !== member.color) {
@@ -378,7 +405,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   }, [currentScreen, roomCode, sessionLoaded, teamRoom?.code]);
 
   useEffect(() => {
-    const handlePopState = () => setCurrentScreen(getScreenFromPath(window.location.pathname));
+    const handlePopState = () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const roomCodeFromUrl = searchParams.get('room')?.trim().toUpperCase() ?? null;
+      setInviteRoomCode(roomCodeFromUrl);
+      setCurrentScreen(getScreenFromPath(window.location.pathname, searchParams.has('room')));
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -386,17 +418,24 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const navigateToScreen = (screen: Screen, replaceHistory = false) => {
     const pathByScreen: Partial<Record<Screen, string>> = {
       home: '/',
+      join: '/',
+      before_record: '/',
       login: '/login',
       signin: '/signin',
       solo_record: '/solo',
       result: '/result',
     };
     const path = pathByScreen[screen];
-    if (path && window.location.pathname !== path) {
+    const shouldKeepInvite = inviteRoomCode !== null &&
+      (screen === 'join' || screen === 'login' || screen === 'signin');
+    const nextUrl = path && shouldKeepInvite
+      ? `${path}?room=${encodeURIComponent(inviteRoomCode)}`
+      : path;
+    if (nextUrl && `${window.location.pathname}${window.location.search}` !== nextUrl) {
       if (replaceHistory) {
-        window.history.replaceState({}, '', path);
+        window.history.replaceState({}, '', nextUrl);
       } else {
-        window.history.pushState({}, '', path);
+        window.history.pushState({}, '', nextUrl);
       }
     }
     setCurrentScreen(screen);
@@ -422,11 +461,19 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setSessionLoaded(true);
         }
       });
-    navigateToScreen('home');
+    navigateToScreen(inviteRoomCode !== null ? 'join' : 'home', inviteRoomCode !== null);
   };
 
   const handleTeamCreated = (room: Room) => {
     setTeamRoom(room);
+  };
+
+  const handleJoinSuccess = (room: Room, member: Pick<RoomMember, 'color'>) => {
+    setTeamRoom(room);
+    setUserColor(normalizeMemberColor(member.color));
+    setRoomDataError('');
+    setInviteRoomCode(null);
+    navigateToScreen('before_record', true);
   };
 
   const handleLogout = async () => {
@@ -698,6 +745,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         const { snapshot } = parsedSnapshot;
 
         ownMemberIdRef.current = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
         const activeRoute = snapshot.routes.find(
           (route) => route.member === snapshot.you.id && route.endedAt === null
         );
@@ -1067,6 +1115,25 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 🗺️ マップ画面へ進む（テスト用）
               </button>
             </div>
+          </div>
+        )}
+
+        {currentScreen === 'join' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <Suspense fallback={<div className="p-6 text-sm text-[#556B5D]">招待画面を読み込んでいます...</div>}>
+              <JoinScreen
+                roomCode={inviteRoomCode}
+                user={user}
+                isSessionLoading={!sessionLoaded}
+                onJoinSuccess={handleJoinSuccess}
+                onNavigateToLogin={() => navigateToScreen('login')}
+                onNavigateToRegister={() => navigateToScreen('signin')}
+                onBack={() => {
+                  setInviteRoomCode(null);
+                  navigateToScreen('home');
+                }}
+              />
+            </Suspense>
           </div>
         )}
 
