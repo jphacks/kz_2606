@@ -464,11 +464,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       await drainQueuedPoints(socket, room, routeId);
     } catch (error) {
       console.error('終了前の位置情報を送信できませんでした:', error);
-      setRecordingError(
-        error instanceof Error && error.message.includes('route mismatch')
-          ? '未送信データの記録先が現在の記録と異なるため、送信を保留しました。'
-          : '未送信の位置情報を保存しましたが、送信できませんでした。'
-      );
+      setRecordingError('未送信の位置情報を保存しましたが、送信できませんでした。');
     }
 
     try {
@@ -513,7 +509,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     socket.onopen = () => {
       if (socketRef.current !== socket) return;
-      reconnectAttemptRef.current = 0;
       setRecordingMessage('接続を確認しています...');
     };
 
@@ -572,14 +567,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             .then(() => drainQueuedPoints(socket, room, activeRoute.id))
             .catch((error: unknown) => {
               console.error('未送信の位置情報を再送できませんでした:', error);
-              if (error instanceof Error && error.message.includes('route mismatch')) {
-                setRecordingError('未送信データの記録先が異なるため、送信を保留して記録を終了します。');
-                stopRequestedRef.current = true;
-                void finishRecordingOnSocket(socket, room, activeRoute.id);
-              } else {
-                setRecordingError('未送信の位置情報を再送できませんでした。再接続を続けます。');
-                socket.close();
-              }
+              setRecordingError('未送信の位置情報を再送できませんでした。再接続を続けます。');
+              socket.close();
             });
           return;
         }
@@ -640,14 +629,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           .then(() => drainQueuedPoints(socket, room, startedRouteId))
           .catch((error: unknown) => {
             console.error('記録開始後の未送信データを送信できませんでした:', error);
-            if (error instanceof Error && error.message.includes('route mismatch')) {
-              setRecordingError('未送信データの記録先が異なるため、送信を保留して記録を終了します。');
-              stopRequestedRef.current = true;
-              void finishRecordingOnSocket(socket, room, startedRouteId);
-            } else {
-              setRecordingError('未送信の位置情報を送信できませんでした。再接続しています。');
-              socket.close();
-            }
+            setRecordingError('未送信の位置情報を送信できませんでした。再接続しています。');
+            socket.close();
           });
       } else if (message.t === 'route_end' && 'route' in message && message.route === routeIdRef.current) {
         completeRecordingStop(socket);

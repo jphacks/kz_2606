@@ -75,19 +75,29 @@ export async function drainOutbox(
   const key = outboxKey(roomCode);
   await withOutboxLock(key, async () => {
     const entries = await readEntries(key);
-    while (entries.length > 0) {
-      const first = entries[0];
-      if (first.routeId !== routeId) {
-        throw new Error(`outbox route mismatch: queued ${first.routeId}, active ${routeId}`);
+    for (let entryIndex = 0; entryIndex < entries.length;) {
+      const entry = entries[entryIndex];
+      if (entry.routeId !== routeId) {
+        entryIndex += 1;
+        continue;
       }
 
-      const batch = first.pts.slice(0, maxPointsPerMessage);
+      const batch = entry.pts.slice(0, maxPointsPerMessage);
+      if (batch.length === 0) {
+        entries.splice(entryIndex, 1);
+        await set(key, entries);
+        continue;
+      }
       sendBatch(batch);
-      first.pts.splice(0, batch.length);
-      if (first.pts.length === 0) entries.shift();
+      entry.pts.splice(0, batch.length);
+      if (entry.pts.length === 0) {
+        entries.splice(entryIndex, 1);
+      }
       await set(key, entries);
     }
-    await del(key);
+    if (entries.length === 0) {
+      await del(key);
+    }
   });
 }
 
