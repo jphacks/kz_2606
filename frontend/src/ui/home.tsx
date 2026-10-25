@@ -138,7 +138,7 @@ export default function Home({
         </div>
 
         {/* 現在地周辺の地図 */}
-        <div className="relative w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100">
+        <div className="relative isolate w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100">
           <MapView position={position} hasLocation={hasLocation} />
           {!hasLocation && (
             <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-white/55 text-sm font-medium text-gray-600">
