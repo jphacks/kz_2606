@@ -160,7 +160,7 @@ GPSアートは**生データのままだと汚い**。ここが一番効く。
 |---|---|---|
 | ビルド | Vite + React 19 + TypeScript | 確定 |
 | 地図 | Leaflet 1.9 + react-leaflet 5。**ただし軌跡は生の Leaflet で描く** | 地図の器・タイル・マーカーは react-leaflet に任せ、**点列だけは React を通さない**（7.2参照） |
-| タイル | **CARTO dark_matter** | 暗い地図＋蛍光色の線が一番映える |
+| タイル | OpenStreetMap 標準 | 当初は CARTO dark_matter（暗い地図＋蛍光色の線が映える）を想定していたが、**昼間のデモなら標準タイルでも線は見える**ので変えていない。ただし**メンバーの色は暗い背景前提で選んだ蛍光寄り**（`#00e5ff` など）なので、明るい背景で沈むようなら線の色か太さを調整する |
 | 状態管理 | React の `useState` / `useRef` | `zustand` は依存に入れてあるが**使っていない**。画面数が少なく `App.tsx` で足りている。**点列は状態に載せない**（7.2・DATA_MODEL 9章） |
 | スタイル | Tailwind CSS v4 | Viteプラグイン1行。モバイルUIを速く作れる |
 | 間引き | **自前実装**（`lib/geo.ts` の `simplifyTrackSegment`） | Douglas-Peucker。simplify-js は入れていない（依存を増やさず、度→メートルの換算を自分で握るため）。確定したセグメントだけ間引く |
