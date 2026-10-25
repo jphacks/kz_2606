@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, Copy, CheckCircle2, ArrowLeft } from 'lucide-react';
-import { memberColors } from '../lib/member_colors';
+import { defaultMemberColor, memberColors, normalizeMemberColor } from '../lib/member_colors';
 
 // メンバーの型定義
 export interface Member {
@@ -36,12 +36,12 @@ export default function Setting({
   inviteUrl,
   isRecording = false,
   isConnecting = false,
-  initialColor = '#0E7861',
+  initialColor = defaultMemberColor,
   onSaveAndReturn,
   onBack
 }: SettingProps) {
   // 選択中のカラーを管理するステート（前回保存した色を初期値にする）
-  const [selectedColor, setSelectedColor] = useState(initialColor);
+  const [selectedColor, setSelectedColor] = useState(() => normalizeMemberColor(initialColor));
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState('');
 

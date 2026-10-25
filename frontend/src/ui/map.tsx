@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { defaultMemberColor } from '../lib/member_colors';
 import type { RoomRouteTrack } from '../lib/types';
 import type { TrackBuffer } from '../lib/track_buffer';
 
@@ -86,7 +87,7 @@ export default function Map({
       position,
       hasLocation,
       trackBuffer,
-      trackColor = '#0E7861',
+      trackColor = defaultMemberColor,
       otherTracks = [],
 }: MapProps) {
     return (

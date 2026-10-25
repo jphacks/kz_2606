@@ -6,7 +6,7 @@ import Setting from './ui/setting';
 import Result from './ui/result';
 import Auth from './ui/Auth';
 import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
-import { defaultMemberColor } from './lib/member_colors';
+import { defaultMemberColor, normalizeMemberColor } from './lib/member_colors';
 import { shouldAcceptPoint } from './lib/geo';
 import {
   connectToRoom,
@@ -105,6 +105,14 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const connectingRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stopRecordingRef = useRef<() => void>(() => {});
+
+  const syncOwnMemberColor = (snapshot: RoomSnapshot) => {
+    const ownMember = snapshot.members.find((member) => member.id === snapshot.you.id);
+    if (!ownMember) return;
+    const ownColor = normalizeMemberColor(ownMember.color);
+    setUserColor(ownColor);
+    activeRouteColorRef.current = ownColor;
+  };
 
   const preserveActiveTrack = () => {
     const routeId = activeRouteIdRef.current;
@@ -219,6 +227,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           return;
         }
         myMemberId = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
         otherTracksRef.current.clear();
         for (const route of snapshot.routes) {
           // The active route is drawn locally; render ended routes from the snapshot.
@@ -285,6 +294,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (!member) {
           console.error('サーバーから不正なメンバー情報が返されました:', message);
           return;
+        }
+        if (member.id === myMemberId) {
+          const ownColor = normalizeMemberColor(member.color);
+          setUserColor(ownColor);
+          activeRouteColorRef.current = ownColor;
         }
         for (const [routeId, track] of otherTracksRef.current) {
           if (track.memberId === member.id && track.color !== member.color) {
@@ -456,7 +470,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
   const handleJoinSuccess = (room: Room, member: Pick<RoomMember, 'color'>) => {
     setTeamRoom(room);
-    setUserColor(member.color);
+    setUserColor(normalizeMemberColor(member.color));
     setRoomDataError('');
     setInviteRoomCode(null);
     navigateToScreen('before_record', true);
@@ -731,6 +745,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         const { snapshot } = parsedSnapshot;
 
         ownMemberIdRef.current = snapshot.you.id;
+        syncOwnMemberColor(snapshot);
         const activeRoute = snapshot.routes.find(
           (route) => route.member === snapshot.you.id && route.endedAt === null
         );

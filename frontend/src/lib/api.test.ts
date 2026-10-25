@@ -19,23 +19,23 @@ describe('joinRoom', () => {
       member: {
         id: 2,
         displayName: 'Guest',
-        color: '#0E7861',
+        color: '#0e7861',
       },
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await joinRoom('KZ26AB', ' Guest ', '#0E7861');
+    const result = await joinRoom('KZ26AB', ' Guest ', '#0e7861');
 
     expect(fetchMock).toHaveBeenCalledWith('/api/rooms/KZ26AB/join', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: 'Guest', color: '#0E7861' }),
+      body: JSON.stringify({ displayName: 'Guest', color: '#0e7861' }),
     });
     expect(result.room.code).toBe('KZ26AB');
     expect(result.member).toMatchObject({
       id: 2,
       displayName: 'Guest',
-      color: '#0E7861',
+      color: '#0e7861',
     });
   });
 
