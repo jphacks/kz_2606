@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Footprints, ArrowRight } from 'lucide-react';
+import { Footprints, ArrowRight, UserRound, KeyRound } from 'lucide-react';
 import { getApiErrorMessage, parseAuthUser } from '../lib/api';
 import type { User } from '../lib/types';
 
@@ -116,7 +116,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
               </label>
               <div className="relative flex items-center">
                 <span className="absolute left-3.5 text-[#7A9A88]">
-                  <Footprints className="w-4 h-4 -rotate-45" />
+                  <UserRound className="w-4 h-4" />
                 </span>
                 <input
                   type="text"
@@ -136,7 +136,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
               </label>
               <div className="relative flex items-center">
                 <span className="absolute left-3.5 text-[#7A9A88]">
-                  <Footprints className="w-4 h-4 -rotate-45" />
+                  <KeyRound className="w-4 h-4" />
                 </span>
                 <input
                   type="password"
