@@ -96,6 +96,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       buffer,
     });
     setOtherTracks([...otherTracksRef.current.values()]);
+    setTrackBuffer(new TrackBuffer());
     activeRouteIdRef.current = null;
     activeRouteMemberIdRef.current = null;
   };
@@ -452,6 +453,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     }
 
     const socket = socketRef.current;
+    preserveActiveTrack();
     if (socket && socket.readyState === WebSocket.OPEN && routeStartedRef.current) {
       // まとめ送信にしているので、最後の数秒分が残っている
       if (pendingPointsRef.current.length > 0) {
@@ -462,7 +464,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           console.error('終了前の位置情報を送信できませんでした:', err);
         }
       }
-      preserveActiveTrack();
       sendStop(socket);
     }
     if (recordingStartedAtRef.current !== null) {
@@ -685,6 +686,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
+      preserveActiveTrack();
       socketRef.current = null;
       routeStartedRef.current = false;
       const wasActive = recordingRef.current || connectingRef.current;
