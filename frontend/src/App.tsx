@@ -331,9 +331,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   stopRecordingRef.current = stopRecording;
 
   useEffect(() => {
-    const keepRecordingOnResult = currentScreen === 'result' &&
+    const keepRecordingOnScreen = (currentScreen === 'result' || currentScreen === 'setting') &&
       (recordingRef.current || connectingRef.current);
-    if (currentScreen !== 'solo_record' && !keepRecordingOnResult) {
+    if (currentScreen !== 'solo_record' && !keepRecordingOnScreen) {
       stopRecordingRef.current();
       setTrackBuffer(new TrackBuffer());
     }
@@ -380,7 +380,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   };
 
   useEffect(() => {
-    if (!isRecording || (currentScreen !== 'solo_record' && currentScreen !== 'result')) return;
+    if (
+      !isRecording ||
+      (currentScreen !== 'solo_record' && currentScreen !== 'result' && currentScreen !== 'setting')
+    ) return;
 
     // 表示の更新はここだけ。点が増えるたびには再レンダリングしない（仕様9章）
     const updateStats = () => {
@@ -640,6 +643,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             <Result
               username={user?.username}
               roomName={roomTitle ?? undefined}
+              isRecording={isRecording}
+              isConnecting={isConnecting}
               onBackToHome={() => navigateToScreen('home')}
             />
           </div>
@@ -714,6 +719,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               memberCount={roomSnapshot?.members.filter((member) => !member.banned).length}
               isMembersLoading={!sessionLoaded || Boolean(teamRoom && !roomSnapshot && !roomDataError)}
               inviteUrl={teamRoom ? buildInviteUrl(teamRoom.code) : undefined}
+              isRecording={isRecording}
+              isConnecting={isConnecting}
               initialColor={userColor}
               onBack={() => navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record')}
               onSaveAndReturn={(selectedColor) => {

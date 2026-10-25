@@ -17,10 +17,18 @@ import {
 interface ActivityProps {
   username?: string;
   roomName?: string;
+  isRecording?: boolean;
+  isConnecting?: boolean;
   onBackToHome?: () => void;
 }
 
-export default function Activity({ username, roomName, onBackToHome }: ActivityProps) {
+export default function Activity({
+  username,
+  roomName,
+  isRecording = false,
+  isConnecting = false,
+  onBackToHome,
+}: ActivityProps) {
   const displayUsername = username?.trim() || null;
   const displayRoomName = roomName?.trim() || 'チーム名未設定';
 
@@ -44,6 +52,13 @@ export default function Activity({ username, roomName, onBackToHome }: ActivityP
           {displayUsername?.charAt(0) ?? <Footprints size={20} />}
         </div>
       </header>
+
+      {(isRecording || isConnecting) && (
+        <div role="status" className="flex items-center gap-2 bg-emerald-50 px-5 py-2 text-xs font-bold text-emerald-800">
+          <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" />
+          {isConnecting ? '記録を接続中です' : '記録中です。画面を見ている間も位置情報を記録しています'}
+        </div>
+      )}
 
       {/* --- サマリーセクション --- */}
       <main className="px-5 pt-6 pb-8">
