@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion, useAnimation } from 'motion/react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { animate, motion, useMotionValue } from 'motion/react';
 
 interface CircularTextProps {
   text: string;
@@ -15,11 +16,6 @@ interface CircularTextProps {
   draggable?: boolean;
 }
 
-interface DragInfo {
-  delta: { x: number };
-  velocity: { x: number };
-}
-
 export default function CircularText({
   text,
   spinDuration = 20,
@@ -30,65 +26,77 @@ export default function CircularText({
   fontSize = 24,
   fontWeight = 900,
   textColor = '#087c60',
+  radius = size * 0.35,
   draggable = false,
 }: CircularTextProps) {
   const letters = Array.from(text);
-  const controls = useAnimation();
-  const currentRotation = useRef(0);
+  const rotation = useMotionValue(0);
+  const pointerId = useRef<number | null>(null);
+  const lastPointerX = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
-    if (!isDragging) {
-      controls.start({
-        rotate: direction === 'clockwise'
-          ? currentRotation.current + 360
-          : currentRotation.current - 360,
-        transition: {
-          duration: spinDuration,
-          ease: 'linear',
-          repeat: Infinity,
-        },
-      });
+    if (isDragging || (isHovered && onHover === 'pause')) {
+      return;
     }
-  }, [spinDuration, direction, controls, isDragging, currentRotation]);
+
+    const speedMultiplier = isHovered
+      ? onHover === 'speedUp' ? 2.5 : onHover === 'slowDown' ? 0.4 : onHover === 'goBonkers' ? 5 : 1
+      : 1;
+    const targetRotation = rotation.get() + (direction === 'clockwise' ? 360 : -360);
+    const animation = animate(rotation, targetRotation, {
+      duration: spinDuration / speedMultiplier,
+      ease: 'linear',
+      repeat: Infinity,
+    });
+
+    return () => animation.stop();
+  }, [direction, isDragging, isHovered, onHover, rotation, spinDuration]);
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!draggable || (event.pointerType === 'mouse' && event.button !== 0)) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    pointerId.current = event.pointerId;
+    lastPointerX.current = event.clientX;
+    setIsDragging(true);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerId.current !== event.pointerId) {
+      return;
+    }
+
+    rotation.set(rotation.get() + (event.clientX - lastPointerX.current) * 0.5);
+    lastPointerX.current = event.clientX;
+  };
+
+  const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointerId.current !== event.pointerId) {
+      return;
+    }
+
+    pointerId.current = null;
+    setIsDragging(false);
+  };
 
   return (
     <div
       className={`relative flex items-center justify-center rounded-full cursor-grab active:cursor-grabbing ${className}`}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, touchAction: draggable ? 'none' : undefined }}
     >
       <motion.div
         className="w-full h-full relative flex items-center justify-center"
-        animate={controls}
-        onUpdate={(latest: { rotate?: number }) => {
-          if (typeof latest.rotate === 'number') {
-            currentRotation.current = latest.rotate;
-          }
-        }}
-        {...(draggable
-          ? {
-              drag: true,
-              dragConstraints: { left: 0, right: 0, top: 0, bottom: 0 },
-              onDragStart: () => {
-                setIsDragging(true);
-                controls.stop();
-              },
-              onDrag: (_event: unknown, info: DragInfo) => {
-                currentRotation.current += info.delta.x * 0.5;
-              },
-              onDragEnd: (_event: unknown, info: DragInfo) => {
-                setIsDragging(false);
-                const velocity = info.velocity.x * 0.1;
-                controls.start({
-                  rotate: currentRotation.current + velocity * 360,
-                  transition: {
-                    duration: spinDuration,
-                    ease: 'easeOut',
-                  },
-                });
-              },
-            }
-          : {})}
+        style={{ rotate: rotation }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onHoverStart={() => setIsHovered(true)}
+        onHoverEnd={() => setIsHovered(false)}
         whileHover={
           onHover !== 'pause'
             ? {
@@ -101,7 +109,6 @@ export default function CircularText({
         {letters.map((letter, i) => {
           const angle = (i / letters.length) * 360;
           const radian = (angle * Math.PI) / 180;
-          const radius = size * 0.35;
           const x = radius * Math.cos(radian);
           const y = radius * Math.sin(radian);
 
