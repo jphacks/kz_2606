@@ -16,6 +16,7 @@ import {
   parseRoomSnapshot,
   parseRouteEndEvent,
   parseRouteStartedEvent,
+  sendMember,
   sendPoints,
   sendStart,
   sendStop,
@@ -66,6 +67,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [soloActivityName, setSoloActivityName] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
+  const [hasTeamInviteQr, setHasTeamInviteQr] = useState(false);
+  const [showTeamInviteQr, setShowTeamInviteQr] = useState(false);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
   const [otherTracks, setOtherTracks] = useState<RoomRouteTrack[]>([]);
   const [roomDataError, setRoomDataError] = useState('');
@@ -94,6 +97,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const activeRouteColorRef = useRef(userColor);
   const preservedMetersRef = useRef(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const roomSocketRef = useRef<WebSocket | null>(null);
+  const pendingMemberColorRef = useRef<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
   const routeStartedRef = useRef(false);
@@ -235,11 +240,21 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     let socket: WebSocket;
     try {
       socket = connectToRoom(activeRoomCode);
+      roomSocketRef.current = socket;
     } catch (error) {
       console.error('チーム情報の接続を開始できませんでした:', error);
       setRoomDataError('チーム情報を取得できませんでした。接続を確認してください。');
       return;
     }
+
+    socket.onopen = () => {
+      if (!isActive || roomSocketRef.current !== socket) return;
+      const pendingColor = pendingMemberColorRef.current;
+      if (pendingColor !== null) {
+        sendMember(socket, pendingColor);
+        pendingMemberColorRef.current = null;
+      }
+    };
 
     socket.onmessage = (event: MessageEvent<string>) => {
       if (!isActive) return;
@@ -440,6 +455,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
     return () => {
       isActive = false;
+      if (roomSocketRef.current === socket) roomSocketRef.current = null;
       socket.close();
     };
   }, [currentScreen, roomCode, sessionLoaded, teamRoom?.code]);
@@ -505,10 +521,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
   const handleTeamCreated = (room: Room) => {
     setTeamRoom(room);
+    setHasTeamInviteQr(true);
+    setShowTeamInviteQr(true);
+    navigateToScreen('before_record', true);
   };
 
   const handleJoinSuccess = (room: Room, member: Pick<RoomMember, 'color'>) => {
     setTeamRoom(room);
+    setHasTeamInviteQr(false);
+    setShowTeamInviteQr(false);
     setUserColor(normalizeMemberColor(member.color));
     setRoomDataError('');
     setInviteRoomCode(null);
@@ -526,6 +547,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setUser(null);
       setRoomCode(null);
       setTeamRoom(null);
+      setHasTeamInviteQr(false);
+      setShowTeamInviteQr(false);
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
       activeTrackBufferRef.current = null;
@@ -1135,27 +1158,6 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 onTeamCreated={handleTeamCreated}
               />
             </div>
-            
-            {/* 🗺️ マップ画面へ進むボタン（テスト用） */}
-            <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
-              <button
-                onClick={() => navigateToScreen('before_record')}
-                style={{
-                  width: '100%',
-                  padding: '14px 20px',
-                  background: '#0E7861',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  boxShadow: '0 4px 6px rgba(14, 120, 97, 0.2)'
-                }}
-              >
-                🗺️ マップ画面へ進む（テスト用）
-              </button>
-            </div>
           </div>
         )}
 
@@ -1218,6 +1220,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 otherTracks={otherTracks.filter((track) =>
                   !roomSnapshot?.members.find((member) => member.id === track.memberId)?.banned
                 )}
+                inviteUrl={currentScreen === 'before_record' && hasTeamInviteQr && teamRoom
+                  ? buildInviteUrl(teamRoom.code)
+                  : undefined}
+                showInviteQr={showTeamInviteQr}
+                onShowInviteQr={() => setShowTeamInviteQr(true)}
+                onDismissInviteQr={() => setShowTeamInviteQr(false)}
               />
             </div>
             <div style={{
@@ -1290,6 +1298,12 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               onBack={() => navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record')}
               onSaveAndReturn={(selectedColor) => {
                 setUserColor(selectedColor);
+                pendingMemberColorRef.current = selectedColor;
+                const socket = roomSocketRef.current ?? socketRef.current;
+                if (socket?.readyState === WebSocket.OPEN) {
+                  sendMember(socket, selectedColor);
+                  pendingMemberColorRef.current = null;
+                }
                 navigateToScreen(window.location.pathname === '/solo' ? 'solo_record' : 'before_record');
               }}
             />

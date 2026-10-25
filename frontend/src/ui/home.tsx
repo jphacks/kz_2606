@@ -1,7 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, LogOut, UserPlus } from 'lucide-react';
-import QRCode from 'qrcode';
-import { buildInviteUrl, createRoom } from '../lib/api';
+import { useState, type FormEvent } from 'react';
+import { Waypoints, Footprints, Flag, Plus, X, History, LogIn, LogOut, UserPlus } from 'lucide-react';
+import { createRoom } from '../lib/api';
 import type { Room } from '../lib/types';
 
 interface HomeProps {
@@ -30,38 +29,8 @@ export default function Home({
   const [soloActivityName, setSoloActivityName] = useState('');
   const [soloNameError, setSoloNameError] = useState('');
   const [teamName, setTeamName] = useState('');
-  const [roomCode, setRoomCode] = useState<string | null>(null);
   const [isCreatingTeam, setIsCreatingTeam] = useState(false);
   const [createTeamError, setCreateTeamError] = useState('');
-  const [inviteQrCode, setInviteQrCode] = useState<string | null>(null);
-  const [qrCodeError, setQrCodeError] = useState<string | null>(null);
-
-  // QRには招待URL（`?room=<CODE>`）を載せる。仕様10章
-  // 部屋コードが無いうちは生成しない（現在ページのURLを載せても参加できない）
-  useEffect(() => {
-    if (!isModalOpen || !roomCode) {
-      setInviteQrCode(null);
-      setQrCodeError(null);
-      return;
-    }
-
-    let cancelled = false;
-    QRCode.toDataURL(buildInviteUrl(roomCode), { width: 192, margin: 1 })
-      .then((dataUrl) => {
-        if (!cancelled) {
-          setInviteQrCode(dataUrl);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setQrCodeError(error instanceof Error ? error.message : String(error));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isModalOpen, roomCode]);
 
   const handleCreateTeam = async () => {
     const title = teamName.trim() || 'まちあるき部';
@@ -69,7 +38,6 @@ export default function Home({
     setIsCreatingTeam(true);
     try {
       const room = await createRoom(title);
-      setRoomCode(room.code);
       onTeamCreated?.(room);
     } catch (err) {
       console.error('チームを作成できませんでした:', err);
@@ -365,27 +333,8 @@ export default function Home({
               tabIndex={isModalOpen ? 0 : -1}
             >
               <Plus size={20} />
-              {isCreatingTeam ? '作成中...' : roomCode ? 'もう一度作成' : 'チームを作成'}
+              {isCreatingTeam ? '作成中...' : 'チームを作成'}
             </button>
-
-            {/* 作成できたら、招待用のQRと部屋コードを出す */}
-            {roomCode && (
-              <div className="mt-4 bg-white border border-gray-200 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-center">
-                {inviteQrCode ? (
-                  <img src={inviteQrCode} alt="招待用QRコード" className="w-48 h-48 mb-3" />
-                ) : qrCodeError ? (
-                  <p role="alert" className="text-sm text-red-600 mb-3">
-                    QRコードを生成できませんでした: {qrCodeError}
-                  </p>
-                ) : (
-                  <div className="w-48 h-48 mb-3 flex items-center justify-center text-[#0E7861]">
-                    <QrCode size={40} aria-hidden="true" />
-                  </div>
-                )}
-                <p className="text-xs text-gray-500 mb-1">このQRを見せて招待しましょう</p>
-                <p className="text-lg font-bold tracking-widest text-gray-900">{roomCode}</p>
-              </div>
-            )}
           </div>
 
           <div>
