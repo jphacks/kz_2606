@@ -183,3 +183,8 @@ export function sendPoints(socket: WebSocket, points: Point[]): void {
 export function sendStop(socket: WebSocket): void {
   socket.send(JSON.stringify({ t: 'stop' }));
 }
+
+/** メンバー情報を更新する。サーバー側で色を正規化・永続化し、全員へ通知する。 */
+export function sendMember(socket: WebSocket, color: string): void {
+  socket.send(JSON.stringify({ t: 'member', color }));
+}
