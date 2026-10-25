@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Footprints, ArrowRight, UserRound, KeyRound } from 'lucide-react';
 import { getApiErrorMessage, parseAuthUser } from '../lib/api';
 import type { User } from '../lib/types';
+import AuthMapHero from './AuthMapHero';
 
 interface LoginProps {
   onNavigateToRegister?: () => void;
@@ -12,8 +13,8 @@ interface LoginProps {
 export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLoginSuccess }: LoginProps) {
   const [accountName, setAccountName] = useState('');
   const [password, setPassword] = useState('');
-  const [errorMessage, setErrorMessage] = useState(''); // エラーメッセージ用
-  const [isLoading, setIsLoading] = useState(false);     // ローディング状態用
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -21,8 +22,6 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
     setIsLoading(true);
 
     try {
-      // バックエンドの /api/auth/login へ送信
-      // ※バックエンド側が username を求めているため accountName を当てはめています
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
@@ -37,7 +36,6 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
       const data: unknown = await response.json();
 
       if (!response.ok) {
-        // サーバーからエラーが返ってきた場合
         setErrorMessage(getApiErrorMessage(data, 'ログインに失敗しました'));
         return;
       }
@@ -88,12 +86,7 @@ export default function Login({ onNavigateToRegister, onStartWithoutAuth, onLogi
           </p>
         </div>
 
-        {/* マッププレースホルダー画像エリア */}
-        <div className="mb-6 rounded-2xl overflow-hidden shadow-md border border-[#E2EBDD] bg-[#E8F0E5] h-44 relative flex items-center justify-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#E2EBDD]/50 to-[#D4E4D0]/50 flex items-center justify-center text-[#7A9A88] text-xs font-medium">
-            Map Preview Area
-          </div>
-        </div>
+        <AuthMapHero />
 
         {/* ログインフォームカード */}
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-[#E2EBDD] mb-6">
