@@ -19,6 +19,8 @@ interface SettingProps {
   members?: Member[];
   isMembersLoading?: boolean;
   inviteUrl?: string;
+  isRecording?: boolean;
+  isConnecting?: boolean;
   initialColor?: string;
   onSaveAndReturn?: (selectedColor: string) => void;
   onBack?: () => void;
@@ -31,6 +33,8 @@ export default function Setting({
   members = [],
   isMembersLoading = false,
   inviteUrl,
+  isRecording = false,
+  isConnecting = false,
   initialColor = '#0E7861',
   onSaveAndReturn,
   onBack
@@ -105,8 +109,12 @@ export default function Setting({
         
         {/* 通知バナー */}
         <div className="bg-[#EBF5F3] text-[#0E7861] text-xs font-medium px-4 py-2.5 rounded-xl mb-5 flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-[#0E7861] animate-pulse"></span>
-          記録中もカラーを変更できます
+          <span className={`w-2 h-2 rounded-full ${isRecording || isConnecting ? 'bg-[#0E7861] animate-pulse' : 'bg-gray-400'}`} />
+          {isConnecting
+            ? '記録を接続中です。画面を移動しても接続は維持されます'
+            : isRecording
+              ? '記録中です。カラー変更後も記録は続きます'
+              : 'カラーは記録前でも変更できます'}
         </div>
 
         {/* 一緒に描いているメンバー一覧 */}
