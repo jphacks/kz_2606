@@ -6,7 +6,8 @@ Docker Compose で PostgreSQL を起動してから、リポジトリのルー�
 
 ```powershell
 docker compose up -d db
-go run backend/cmd/server/main.go
+cd backend
+go run ./cmd/server
 ```
 
 既定では `localhost:5432` の開発用 PostgreSQL とポート `8080` を使います。

@@ -30,4 +30,20 @@ describe('drainOutbox', () => {
       { routeId: 10, pts: [oldPoint] },
     ]);
   });
+
+  it('keeps an unsent batch when delivery fails', async () => {
+    const points = Array.from(
+      { length: 501 },
+      (_, index): Point => [40, 140, index, 5],
+    );
+    await enqueuePoints(roomCode, 12, points);
+    let attempts = 0;
+
+    await expect(drainOutbox(roomCode, 12, () => {
+      attempts += 1;
+      if (attempts === 2) throw new Error('socket closed');
+    })).rejects.toThrow('socket closed');
+
+    expect((await get<OutboxEntry[]>(storageKey))?.[0].pts).toEqual(points.slice(500));
+  });
 });

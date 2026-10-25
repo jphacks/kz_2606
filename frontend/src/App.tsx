@@ -7,10 +7,21 @@ import Result from './ui/result';
 import Auth from './ui/Auth';
 import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
 import { shouldAcceptPoint } from './lib/geo';
-import { connectToRoom, flushIntervalMilliseconds, parseRoomMember, parseRoomSnapshot, sendPoints, sendStart, sendStop } from './lib/ws';
+import {
+  connectToRoom,
+  flushIntervalMilliseconds,
+  parsePointsEvent,
+  parseRoomMember,
+  parseRoomSnapshot,
+  parseRouteEndEvent,
+  parseRouteStartedEvent,
+  sendPoints,
+  sendStart,
+  sendStop,
+} from './lib/ws';
 import { drainOutbox, enqueuePoints } from './lib/outbox';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, Room, RoomSnapshot, User } from './lib/types';
+import type { Point, Room, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
 
@@ -43,6 +54,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [roomTitle, setRoomTitle] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
+  const [otherTracks, setOtherTracks] = useState<RoomRouteTrack[]>([]);
   const [roomDataError, setRoomDataError] = useState('');
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -58,6 +70,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [hasRecorded, setHasRecorded] = useState(false);
   const authRequestVersion = useRef(0);
+  const otherTracksRef = useRef(new Map<number, RoomRouteTrack>());
+  const activeTrackBufferRef = useRef<TrackBuffer | null>(null);
+  const activeRouteIdRef = useRef<number | null>(null);
+  const activeRouteMemberIdRef = useRef<number | null>(null);
+  const activeRouteColorRef = useRef(userColor);
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
@@ -74,6 +91,24 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const connectingRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stopRecordingRef = useRef<() => void>(() => {});
+
+  const preserveActiveTrack = () => {
+    const routeId = activeRouteIdRef.current;
+    const buffer = activeTrackBufferRef.current;
+    const memberId = activeRouteMemberIdRef.current;
+    if (routeId === null || !buffer || memberId === null) return;
+
+    otherTracksRef.current.set(routeId, {
+      routeId,
+      memberId,
+      color: activeRouteColorRef.current,
+      buffer,
+    });
+    setOtherTracks([...otherTracksRef.current.values()]);
+    setTrackBuffer(new TrackBuffer());
+    activeRouteIdRef.current = null;
+    activeRouteMemberIdRef.current = null;
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -121,12 +156,17 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       (currentScreen === 'setting' && window.location.pathname !== '/result');
     if (!sessionLoaded || !activeRoomCode || !isRoomScreen) {
       setRoomSnapshot(null);
+      otherTracksRef.current.clear();
+      setOtherTracks([]);
       setRoomDataError('');
       return;
     }
 
     let isActive = true;
+    let myMemberId: number | null = null;
     setRoomSnapshot(null);
+    otherTracksRef.current.clear();
+    setOtherTracks([]);
     setRoomDataError('');
     let socket: WebSocket;
     try {
@@ -150,25 +190,89 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
       if (typeof message !== 'object' || message === null || !('t' in message)) return;
       if (message.t === 'snapshot') {
-        const snapshot = parseRoomSnapshot(message);
-        if (!snapshot) {
+        const parsedSnapshot = parseRoomSnapshot(message);
+        if (!parsedSnapshot) {
           console.error('サーバーから不正なチーム情報が返されました:', message);
           setRoomDataError('サーバーから不正なチーム情報が返されました。');
           return;
         }
+        const { snapshot, routePoints } = parsedSnapshot;
         if (snapshot.room.code.toUpperCase() !== activeRoomCode.toUpperCase()) {
           console.error('別のルームの情報を受信しました:', snapshot.room.code);
           setRoomDataError('別のチーム情報を受信しました。再読み込みしてください。');
           return;
         }
+        myMemberId = snapshot.you.id;
+        otherTracksRef.current.clear();
+        for (const route of snapshot.routes) {
+          // The active route is drawn locally; render ended routes from the snapshot.
+          if (route.member === myMemberId && route.endedAt === null) continue;
+          const member = snapshot.members.find((current) => current.id === route.member);
+          if (!member || member.banned) continue;
+          const buffer = new TrackBuffer();
+          for (const point of routePoints.get(route.id) ?? []) {
+            buffer.add(point);
+          }
+          otherTracksRef.current.set(route.id, {
+            routeId: route.id,
+            memberId: route.member,
+            color: member.color,
+            buffer,
+          });
+        }
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot(snapshot);
         setRoomDataError('');
+      } else if (message.t === 'route') {
+        const route = parseRouteStartedEvent(message);
+        if (!route) {
+          console.error('サーバーから不正な記録開始情報が返されました:', message);
+          return;
+        }
+        if (route.member === myMemberId) {
+          activeRouteIdRef.current = route.id;
+          activeRouteMemberIdRef.current = route.member;
+          activeRouteColorRef.current = route.color;
+        }
+        if (route.member !== myMemberId) {
+          const current = otherTracksRef.current.get(route.id);
+          otherTracksRef.current.set(route.id, current
+            ? { ...current, color: route.color }
+            : {
+              routeId: route.id,
+              memberId: route.member,
+              color: route.color,
+              buffer: new TrackBuffer(),
+            });
+          setOtherTracks([...otherTracksRef.current.values()]);
+        }
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          routes: [
+            ...snapshot.routes.filter((current) => current.id !== route.id),
+            {
+              id: route.id,
+              member: route.member,
+              color: route.color,
+              startedAt: route.startedAt,
+              endedAt: null,
+              meters: 0,
+              elapsedMs: 0,
+            },
+          ],
+        }) : snapshot);
       } else if (message.t === 'member' && 'member' in message) {
         const member = parseRoomMember(message.member);
         if (!member) {
           console.error('サーバーから不正なメンバー情報が返されました:', message);
           return;
         }
+        for (const [routeId, track] of otherTracksRef.current) {
+          if (track.memberId === member.id && track.color !== member.color) {
+            otherTracksRef.current.set(routeId, { ...track, color: member.color });
+          }
+        }
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
           members: [
@@ -176,6 +280,17 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             member,
           ],
         }) : snapshot);
+      } else if (message.t === 'points') {
+        const points = parsePointsEvent(message);
+        if (!points) {
+          console.error('サーバーから不正な軌跡データが返されました:', message);
+          return;
+        }
+        const track = otherTracksRef.current.get(points.routeId);
+        if (!track) return;
+        for (const point of points.points) {
+          track.buffer.add(point);
+        }
       } else if (message.t === 'leave' && 'member' in message && typeof message.member === 'number') {
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -195,10 +310,43 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             ? { ...member, banned }
             : member),
         }) : snapshot);
+      } else if (message.t === 'route_end') {
+        const routeEnd = parseRouteEndEvent(message);
+        if (!routeEnd) {
+          console.error('サーバーから不正な記録終了情報が返されました:', message);
+          return;
+        }
+        if (routeEnd.memberId === myMemberId && activeRouteIdRef.current === routeEnd.routeId) {
+          preserveActiveTrack();
+        }
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          routes: snapshot.routes.map((route) => route.id === routeEnd.routeId
+            ? { ...route, endedAt: routeEnd.endedAt }
+            : route),
+          members: snapshot.members.map((member) => member.id === routeEnd.memberId
+            ? { ...member, recording: false }
+            : member),
+        }) : snapshot);
       } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
+        otherTracksRef.current.delete(message.route);
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
           routes: snapshot.routes.filter((route) => route.id !== message.route),
+        }) : snapshot);
+      } else if (message.t === 'closed') {
+        const closedAt = 'closedAt' in message && typeof message.closedAt === 'string'
+          ? message.closedAt
+          : new Date().toISOString();
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, closedAt },
+        }) : snapshot);
+      } else if (message.t === 'reopened') {
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, closedAt: null },
         }) : snapshot);
       } else if (message.t === 'error' && 'message' in message && typeof message.message === 'string') {
         setRoomDataError(message.message);
@@ -286,6 +434,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setRoomTitle(null);
       setTeamRoom(null);
       setRoomSnapshot(null);
+      otherTracksRef.current.clear();
+      activeTrackBufferRef.current = null;
+      activeRouteIdRef.current = null;
+      activeRouteMemberIdRef.current = null;
+      setOtherTracks([]);
       setRoomDataError('');
       setSessionLoaded(true);
       setRecordingError('');
@@ -317,6 +470,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     }
 
     const socket = socketRef.current;
+    preserveActiveTrack();
     if (recordingStartedAtRef.current !== null) {
       setElapsedSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000));
       recordingStartedAtRef.current = null;
@@ -526,13 +680,14 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
       if (typeof message !== 'object' || message === null || !('t' in message)) return;
       if (message.t === 'snapshot') {
-        const snapshot = parseRoomSnapshot(message);
-        if (!snapshot || snapshot.room.code.toUpperCase() !== room.toUpperCase()) {
+        const parsedSnapshot = parseRoomSnapshot(message);
+        if (!parsedSnapshot || parsedSnapshot.snapshot.room.code.toUpperCase() !== room.toUpperCase()) {
           console.error('再接続時に不正なルーム情報を受信しました:', message);
           setRecordingError('再接続時に不正なルーム情報を受信しました。');
           socket.close();
           return;
         }
+        const { snapshot } = parsedSnapshot;
 
         ownMemberIdRef.current = snapshot.you.id;
         const activeRoute = snapshot.routes.find(
@@ -540,17 +695,54 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         );
         if (activeRoute) {
           if (routeIdRef.current !== null && routeIdRef.current !== activeRoute.id) {
-            console.error('再接続先の記録IDが一致しません:', {
-              previous: routeIdRef.current,
+            const previousRouteId = routeIdRef.current;
+            console.warn('再接続先の記録IDが変わりました。古いrouteのoutboxは保持します。', {
+              previous: previousRouteId,
               active: activeRoute.id,
             });
-            setRecordingError('再接続先の記録が異なります。未送信データは保留されています。');
-            shouldReconnectRef.current = false;
-            stopRequestedRef.current = true;
-            void finishRecordingOnSocket(socket, room, activeRoute.id);
+            if (watchIdRef.current !== null) {
+              navigator.geolocation.clearWatch(watchIdRef.current);
+              watchIdRef.current = null;
+            }
+            void persistPendingPoints(room, previousRouteId)
+              .then(() => {
+                if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) return;
+                preserveActiveTrack();
+                const nextBuffer = new TrackBuffer();
+                recordingBufferRef.current = nextBuffer;
+                activeTrackBufferRef.current = nextBuffer;
+                activeRouteIdRef.current = activeRoute.id;
+                activeRouteMemberIdRef.current = activeRoute.member;
+                activeRouteColorRef.current = activeRoute.color;
+                reconnectAttemptRef.current = 0;
+                setTrackBuffer(nextBuffer);
+                routeIdRef.current = activeRoute.id;
+                routeStartedRef.current = true;
+                if (stopRequestedRef.current) {
+                  void finishRecordingOnSocket(socket, room, activeRoute.id);
+                  return;
+                }
+                recordingRef.current = true;
+                connectingRef.current = false;
+                setIsRecording(true);
+                setIsConnecting(false);
+                setHasRecorded(true);
+                setRecordingMessage('位置情報を記録してサーバーへ送信中です');
+                startLocationWatch(nextBuffer);
+                void resumeActiveRoute(socket, room, activeRoute.id);
+              })
+              .catch((error: unknown) => {
+                console.error('記録ID切り替え前の位置情報を保存できませんでした:', error);
+                setRecordingError('未送信の位置情報を保存できませんでした。再接続を続けます。');
+                socket.close();
+              });
             return;
           }
           routeIdRef.current = activeRoute.id;
+          activeTrackBufferRef.current = buffer;
+          activeRouteIdRef.current = activeRoute.id;
+          activeRouteMemberIdRef.current = activeRoute.member;
+          activeRouteColorRef.current = activeRoute.color;
           routeStartedRef.current = true;
           reconnectAttemptRef.current = 0;
           if (stopRequestedRef.current) {
@@ -563,13 +755,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           setIsConnecting(false);
           setRecordingMessage('位置情報を記録してサーバーへ送信中です');
           startLocationWatch(buffer);
-          void persistPendingPoints(room, activeRoute.id)
-            .then(() => drainQueuedPoints(socket, room, activeRoute.id))
-            .catch((error: unknown) => {
-              console.error('未送信の位置情報を再送できませんでした:', error);
-              setRecordingError('未送信の位置情報を再送できませんでした。再接続を続けます。');
-              socket.close();
-            });
+          void resumeActiveRoute(socket, room, activeRoute.id);
           return;
         }
 
@@ -578,9 +764,35 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           return;
         }
         if (routeIdRef.current !== null) {
-          setRecordingError('記録を再開できません。未送信データは保留されています。');
-          shouldReconnectRef.current = false;
-          completeRecordingStop(socket);
+          const previousRouteId = routeIdRef.current;
+          if (watchIdRef.current !== null) {
+            navigator.geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
+          }
+          void persistPendingPoints(room, previousRouteId)
+            .then(() => {
+              if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) return;
+              if (stopRequestedRef.current) {
+                completeRecordingStop(socket);
+                return;
+              }
+              preserveActiveTrack();
+              const nextBuffer = new TrackBuffer();
+              recordingBufferRef.current = nextBuffer;
+              activeTrackBufferRef.current = nextBuffer;
+              activeRouteIdRef.current = null;
+              activeRouteMemberIdRef.current = null;
+              setTrackBuffer(nextBuffer);
+              routeIdRef.current = null;
+              sendStart(socket);
+              connectingRef.current = true;
+              setIsConnecting(true);
+            })
+            .catch((error: unknown) => {
+              console.error('再接続前の位置情報を保存できませんでした:', error);
+              setRecordingError('未送信の位置情報を保存できませんでした。再接続を続けます。');
+              socket.close();
+            });
           return;
         }
 
@@ -596,21 +808,24 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         return;
       }
 
-      if (message.t === 'route' && 'route' in message && typeof message.route === 'object' && message.route !== null) {
-        const route = message.route;
-        if (
-          !('id' in route) || typeof route.id !== 'number' ||
-          !('member' in route) || typeof route.member !== 'number' ||
-          route.member !== ownMemberIdRef.current
-        ) return;
+      if (message.t === 'route') {
+        const route = parseRouteStartedEvent(message);
+        if (!route || route.member !== ownMemberIdRef.current) return;
         const startedRouteId = route.id;
         if (routeIdRef.current !== null && routeIdRef.current !== startedRouteId) {
-          setRecordingError('記録IDが一致しないため、未送信データを保留しています。');
-          shouldReconnectRef.current = false;
-          completeRecordingStop(socket);
+          console.error('新しいroute開始前に古い未送信点を保存できませんでした:', {
+            previous: routeIdRef.current,
+            started: startedRouteId,
+          });
+          setRecordingError('記録IDが一致しないため、未送信データは保留されています。');
+          socket.close();
           return;
         }
         routeIdRef.current = startedRouteId;
+        activeRouteIdRef.current = startedRouteId;
+        activeRouteMemberIdRef.current = route.member;
+        activeRouteColorRef.current = route.color;
+        activeTrackBufferRef.current = recordingBufferRef.current;
         routeStartedRef.current = true;
         reconnectAttemptRef.current = 0;
         if (stopRequestedRef.current) {
@@ -625,13 +840,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         setHasRecorded(true);
         setRecordingMessage('位置情報を記録してサーバーへ送信中です');
         startLocationWatch(recordingBufferRef.current);
-        void persistPendingPoints(room, startedRouteId)
-          .then(() => drainQueuedPoints(socket, room, startedRouteId))
-          .catch((error: unknown) => {
-            console.error('記録開始後の未送信データを送信できませんでした:', error);
-            setRecordingError('未送信の位置情報を送信できませんでした。再接続しています。');
-            socket.close();
-          });
+        void resumeActiveRoute(socket, room, startedRouteId);
       } else if (message.t === 'route_end' && 'route' in message && message.route === routeIdRef.current) {
         completeRecordingStop(socket);
       } else if (message.t === 'error') {
@@ -666,6 +875,17 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         scheduleReconnect();
       }
     };
+  }
+
+  async function resumeActiveRoute(socket: WebSocket, room: string, routeId: number): Promise<void> {
+    try {
+      await persistPendingPoints(room, routeId);
+      await drainQueuedPoints(socket, room, routeId);
+    } catch (error) {
+      console.error('未送信の位置情報を再送できませんでした:', error);
+      setRecordingError('未送信の位置情報を再送できませんでした。再接続を続けます。');
+      socket.close();
+    }
   }
 
   useEffect(() => {
@@ -732,6 +952,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     setRecordingMessage('サーバーに接続しています...');
     const buffer = new TrackBuffer();
     recordingBufferRef.current = buffer;
+    activeTrackBufferRef.current = buffer;
+    activeRouteIdRef.current = null;
+    activeRouteMemberIdRef.current = null;
+    activeRouteColorRef.current = userColor;
     setTrackBuffer(buffer);
     setDistanceTravelled(0);
     setElapsedSeconds(0);
@@ -861,7 +1085,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         {(currentScreen === 'before_record' || currentScreen === 'solo_record') && (
           <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
-              <MapView position={position} hasLocation={hasLocation} trackBuffer={trackBuffer} trackColor={userColor} />
+              <MapView
+                position={position}
+                hasLocation={hasLocation}
+                trackBuffer={trackBuffer}
+                trackColor={userColor}
+                otherTracks={otherTracks.filter((track) =>
+                  !roomSnapshot?.members.find((member) => member.id === track.memberId)?.banned
+                )}
+              />
             </div>
             <div style={{
               position: 'absolute',
@@ -883,6 +1115,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 teamName={roomSnapshot?.room.title}
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
+                roomClosed={Boolean(roomSnapshot?.room.closedAt)}
                 isMembersLoading={currentScreen === 'before_record' && (
                   !sessionLoaded || (Boolean(teamRoom?.code) && !roomSnapshot && !roomDataError)
                 )}

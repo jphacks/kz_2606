@@ -275,7 +275,7 @@ Set-Cookie: session=<HMAC署名付き>; HttpOnly; Secure; SameSite=Lax; Path=/; 
 ```
 GET  /api/health          → {"ok": true}
 GET  /ws?room={code}      → WebSocket upgrade
-GET  /*                   → 埋め込みSPA（未知パスは index.html）
+GET  /*                   → 埋め込み静的ファイル / SPA（画面パスは index.html。未知のassetと /api・/ws は404）
 ```
 
 ---
@@ -576,6 +576,10 @@ Map<routeId, {
 再接続後に別の route が始まっていると、点の所属先が分からなくなる。
 
 再接続時に500点ずつ送り直し、途中で失敗したら残りを書き戻す。
+
+再接続snapshotに同じmemberの記録中routeがあればそのrouteを再開する。
+routeが無い場合は切断中にサーバー側で終了済みなので、新しいrouteを開始する。
+古いrouteのoutboxはroute IDが一致しないため新しいrouteへは送らず、容量上限まで保持する。
 
 > **再送中は直送を止める。** `outbox` の吐き出しは非同期なので、その隙間に
 > 新しい点を直送すると**時刻が逆行した点列**が他クライアントに届く。

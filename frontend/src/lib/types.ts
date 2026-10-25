@@ -34,16 +34,25 @@ export interface RoomMember {
 export interface RoomRouteStats {
   id: number;
   member: number;
+  color: string;
+  startedAt: string;
   endedAt: string | null;
   meters: number;
   elapsedMs: number;
 }
 
 export interface RoomSnapshot {
-  room: Pick<Room, 'code' | 'title'>;
+  room: Pick<Room, 'code' | 'title' | 'closedAt'>;
   you: Pick<RoomMember, 'id'>;
   members: RoomMember[];
   routes: RoomRouteStats[];
 }
 
 export type Point = [lat: number, lng: number, ts: number, acc: number];
+
+export interface RoomRouteTrack {
+  routeId: number;
+  memberId: number;
+  color: string;
+  buffer: import('./track_buffer').TrackBuffer;
+}

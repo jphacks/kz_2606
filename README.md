@@ -134,7 +134,7 @@ WebSocket で全員に配信するので、**他のメンバーの線が歩い�
 docker compose up -d db
 
 # バックエンド（:8080）
-go run backend/cmd/server/main.go
+cd backend && go run ./cmd/server
 
 # フロントエンド（:5173。/api と /ws は :8080 にプロキシ）
 cd frontend && npm install && npm run dev
