@@ -70,7 +70,9 @@ func run() error {
 		wsRegistry,
 	)
 	mux.Handle("GET /", rest.StaticHandler(webFiles))
-	mux.Handle("/ws", ws.NewHandler(authService, roomService, wsRegistry, sessionService))
+	// GET を明示する。メソッド無しの "/ws" は "GET /"（SPA配信）と衝突すると
+	// Go 1.22+ の ServeMux が判定して、起動時に panic する。
+	mux.Handle("GET /ws", ws.NewHandler(authService, roomService, wsRegistry, sessionService))
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
