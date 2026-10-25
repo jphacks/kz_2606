@@ -60,6 +60,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [currentScreen, setCurrentScreen] = useState<Screen>(initialScreen);
   const [position, setPosition] = useState<[number, number]>([36.578, 136.648]);
   const [hasLocation, setHasLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const [userColor, setUserColor] = useState<string>(defaultMemberColor);
   const [inviteRoomCode, setInviteRoomCode] = useState(
     () => new URLSearchParams(window.location.search).get('room')?.trim().toUpperCase() ?? null,
@@ -169,10 +170,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         (location) => {
           setPosition([location.coords.latitude, location.coords.longitude]);
           setHasLocation(true);
+          setLocationError(null);
         },
-        (error) => console.error('位置情報取得エラー:', error),
+        (error) => {
+          console.error('位置情報取得エラー:', error);
+          setLocationError('現在地を取得できません。位置情報の許可を確認してください。');
+        },
         { enableHighAccuracy: true }
       );
+    } else {
+      setLocationError('このブラウザーでは位置情報を利用できません。');
     }
 
     return () => {
@@ -1159,6 +1166,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             <div style={{ flex: 1 }}>
               <Home
                 key={user?.username ?? 'anonymous'}
+                position={position}
+                hasLocation={hasLocation}
+                locationError={locationError}
                 username={user?.username}
                 onLogout={handleLogout}
                 isLoggingOut={isLoggingOut}

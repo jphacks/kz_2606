@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { Waypoints, Footprints, Flag, Plus, X, History, LogIn, LogOut, UserPlus } from 'lucide-react';
 import { createRoom } from '../lib/api';
+import MapView from './map';
 import type { Room } from '../lib/types';
 
 interface HomeProps {
+  position: [number, number];
+  hasLocation: boolean;
+  locationError?: string | null;
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
   onStartSolo?: (activityName: string) => void;
@@ -15,6 +19,9 @@ interface HomeProps {
 }
 
 export default function Home({
+  position,
+  hasLocation,
+  locationError,
   onNavigateToLogin,
   onNavigateToRegister,
   onStartSolo,
@@ -130,13 +137,14 @@ export default function Home({
           </p>
         </div>
 
-        {/* ヒーロー画像 */}
-        <div className="relative w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100 flex items-center justify-center">
-          <img 
-            src="/hero-map.png" 
-            alt="GPSアートの軌跡" 
-            className="w-full h-full object-cover"
-          />
+        {/* 現在地周辺の地図 */}
+        <div className="relative w-full h-56 rounded-2xl overflow-hidden mb-10 shadow-inner bg-gray-100">
+          <MapView position={position} hasLocation={hasLocation} />
+          {!hasLocation && (
+            <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-white/55 text-sm font-medium text-gray-600">
+              {locationError ?? '現在地を取得しています...'}
+            </div>
+          )}
         </div>
 
         {/* アクションセクション */}
