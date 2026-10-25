@@ -111,7 +111,7 @@ export default function BeforeRecord({
             </span>
           </div>
           <h2 className="text-lg font-black text-gray-900">
-            {isSolo ? '今日の軌跡を描こう' : '吉祥寺にハートを描こう'}
+            {isSolo ? teamName ?? '今日の軌跡を描こう' : '吉祥寺にハートを描こう'}
           </h2>
           <p className="text-[11px] text-gray-500 leading-snug">
             {isSolo
