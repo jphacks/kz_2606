@@ -7,9 +7,20 @@ import Result from './ui/result';
 import Auth from './ui/Auth';
 import { buildInviteUrl, getCurrentSession, logout } from './lib/api';
 import { shouldAcceptPoint } from './lib/geo';
-import { connectToRoom, flushIntervalMilliseconds, parseRoomMember, parseRoomSnapshot, sendPoints, sendStart, sendStop } from './lib/ws';
+import {
+  connectToRoom,
+  flushIntervalMilliseconds,
+  parsePointsEvent,
+  parseRoomMember,
+  parseRoomSnapshot,
+  parseRouteEndEvent,
+  parseRouteStartedEvent,
+  sendPoints,
+  sendStart,
+  sendStop,
+} from './lib/ws';
 import { TrackBuffer } from './lib/track_buffer';
-import type { Point, Room, RoomSnapshot, User } from './lib/types';
+import type { Point, Room, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
 type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result';
 
@@ -42,6 +53,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [roomTitle, setRoomTitle] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [roomSnapshot, setRoomSnapshot] = useState<RoomSnapshot | null>(null);
+  const [otherTracks, setOtherTracks] = useState<RoomRouteTrack[]>([]);
   const [roomDataError, setRoomDataError] = useState('');
   const [sessionLoaded, setSessionLoaded] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -57,6 +69,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [hasRecorded, setHasRecorded] = useState(false);
   const authRequestVersion = useRef(0);
+  const otherTracksRef = useRef(new Map<number, RoomRouteTrack>());
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
@@ -112,12 +125,17 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       (currentScreen === 'setting' && window.location.pathname !== '/result');
     if (!sessionLoaded || !activeRoomCode || !isRoomScreen) {
       setRoomSnapshot(null);
+      otherTracksRef.current.clear();
+      setOtherTracks([]);
       setRoomDataError('');
       return;
     }
 
     let isActive = true;
+    let myMemberId: number | null = null;
     setRoomSnapshot(null);
+    otherTracksRef.current.clear();
+    setOtherTracks([]);
     setRoomDataError('');
     let socket: WebSocket;
     try {
@@ -141,25 +159,83 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
 
       if (typeof message !== 'object' || message === null || !('t' in message)) return;
       if (message.t === 'snapshot') {
-        const snapshot = parseRoomSnapshot(message);
-        if (!snapshot) {
+        const parsedSnapshot = parseRoomSnapshot(message);
+        if (!parsedSnapshot) {
           console.error('サーバーから不正なチーム情報が返されました:', message);
           setRoomDataError('サーバーから不正なチーム情報が返されました。');
           return;
         }
+        const { snapshot, routePoints } = parsedSnapshot;
         if (snapshot.room.code.toUpperCase() !== activeRoomCode.toUpperCase()) {
           console.error('別のルームの情報を受信しました:', snapshot.room.code);
           setRoomDataError('別のチーム情報を受信しました。再読み込みしてください。');
           return;
         }
+        myMemberId = snapshot.you.id;
+        otherTracksRef.current.clear();
+        for (const route of snapshot.routes) {
+          if (route.member === myMemberId) continue;
+          const member = snapshot.members.find((current) => current.id === route.member);
+          if (!member || member.banned) continue;
+          const buffer = new TrackBuffer();
+          for (const point of routePoints.get(route.id) ?? []) {
+            buffer.add(point);
+          }
+          otherTracksRef.current.set(route.id, {
+            routeId: route.id,
+            memberId: route.member,
+            color: member.color,
+            buffer,
+          });
+        }
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot(snapshot);
         setRoomDataError('');
+      } else if (message.t === 'route') {
+        const route = parseRouteStartedEvent(message);
+        if (!route) {
+          console.error('サーバーから不正な記録開始情報が返されました:', message);
+          return;
+        }
+        if (route.member !== myMemberId) {
+          const current = otherTracksRef.current.get(route.id);
+          otherTracksRef.current.set(route.id, current
+            ? { ...current, color: route.color }
+            : {
+              routeId: route.id,
+              memberId: route.member,
+              color: route.color,
+              buffer: new TrackBuffer(),
+            });
+          setOtherTracks([...otherTracksRef.current.values()]);
+        }
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          routes: [
+            ...snapshot.routes.filter((current) => current.id !== route.id),
+            {
+              id: route.id,
+              member: route.member,
+              color: route.color,
+              startedAt: route.startedAt,
+              endedAt: null,
+              meters: 0,
+              elapsedMs: 0,
+            },
+          ],
+        }) : snapshot);
       } else if (message.t === 'member' && 'member' in message) {
         const member = parseRoomMember(message.member);
         if (!member) {
           console.error('サーバーから不正なメンバー情報が返されました:', message);
           return;
         }
+        for (const [routeId, track] of otherTracksRef.current) {
+          if (track.memberId === member.id && track.color !== member.color) {
+            otherTracksRef.current.set(routeId, { ...track, color: member.color });
+          }
+        }
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
           members: [
@@ -167,6 +243,17 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             member,
           ],
         }) : snapshot);
+      } else if (message.t === 'points') {
+        const points = parsePointsEvent(message);
+        if (!points) {
+          console.error('サーバーから不正な軌跡データが返されました:', message);
+          return;
+        }
+        const track = otherTracksRef.current.get(points.routeId);
+        if (!track) return;
+        for (const point of points.points) {
+          track.buffer.add(point);
+        }
       } else if (message.t === 'leave' && 'member' in message && typeof message.member === 'number') {
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -186,10 +273,40 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
             ? { ...member, banned }
             : member),
         }) : snapshot);
+      } else if (message.t === 'route_end') {
+        const routeEnd = parseRouteEndEvent(message);
+        if (!routeEnd) {
+          console.error('サーバーから不正な記録終了情報が返されました:', message);
+          return;
+        }
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          routes: snapshot.routes.map((route) => route.id === routeEnd.routeId
+            ? { ...route, endedAt: routeEnd.endedAt }
+            : route),
+          members: snapshot.members.map((member) => member.id === routeEnd.memberId
+            ? { ...member, recording: false }
+            : member),
+        }) : snapshot);
       } else if (message.t === 'route_deleted' && 'route' in message && typeof message.route === 'number') {
+        otherTracksRef.current.delete(message.route);
+        setOtherTracks([...otherTracksRef.current.values()]);
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
           routes: snapshot.routes.filter((route) => route.id !== message.route),
+        }) : snapshot);
+      } else if (message.t === 'closed') {
+        const closedAt = 'closedAt' in message && typeof message.closedAt === 'string'
+          ? message.closedAt
+          : new Date().toISOString();
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, closedAt },
+        }) : snapshot);
+      } else if (message.t === 'reopened') {
+        setRoomSnapshot((snapshot) => snapshot ? ({
+          ...snapshot,
+          room: { ...snapshot.room, closedAt: null },
         }) : snapshot);
       } else if (message.t === 'error' && 'message' in message && typeof message.message === 'string') {
         setRoomDataError(message.message);
@@ -277,6 +394,8 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setRoomTitle(null);
       setTeamRoom(null);
       setRoomSnapshot(null);
+      otherTracksRef.current.clear();
+      setOtherTracks([]);
       setRoomDataError('');
       setSessionLoaded(true);
       setRecordingError('');
@@ -642,7 +761,15 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         {(currentScreen === 'before_record' || currentScreen === 'solo_record') && (
           <div style={{ flex: 1, position: 'relative', width: '100%', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
-              <MapView position={position} hasLocation={hasLocation} trackBuffer={trackBuffer} trackColor={userColor} />
+              <MapView
+                position={position}
+                hasLocation={hasLocation}
+                trackBuffer={trackBuffer}
+                trackColor={userColor}
+                otherTracks={otherTracks.filter((track) =>
+                  !roomSnapshot?.members.find((member) => member.id === track.memberId)?.banned
+                )}
+              />
             </div>
             <div style={{
               position: 'absolute',
@@ -664,6 +791,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 teamName={roomSnapshot?.room.title}
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
+                roomClosed={Boolean(roomSnapshot?.room.closedAt)}
                 isMembersLoading={currentScreen === 'before_record' && (
                   !sessionLoaded || (Boolean(teamRoom?.code) && !roomSnapshot && !roomDataError)
                 )}

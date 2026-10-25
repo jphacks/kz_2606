@@ -1,7 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import type { RoomRouteTrack } from '../lib/types';
 import type { TrackBuffer } from '../lib/track_buffer';
 
 // 現在地取得時に地図の中心を自動で移動するヘルパー
@@ -18,6 +19,7 @@ const RecenterMap = ({ center }: { center: [number, number] }) => {
 // 一括投入は setLatLngs / 増分は addLatLng（仕様: DATA_MODEL.md 9章）
 const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) => {
     const map = useMap();
+    const polylinesRef = useRef<L.Polyline[]>([]);
 
     useEffect(() => {
         const group = L.layerGroup().addTo(map);
@@ -41,12 +43,20 @@ const TrackLayer = ({ buffer, color }: { buffer: TrackBuffer; color: string }) =
             }
             polylines[segmentIndex].addLatLng(coordinate);
         });
+        polylinesRef.current = polylines;
 
         return () => {
             unsubscribe();
             group.remove();
+            polylinesRef.current = [];
         };
-    }, [buffer, color, map]);
+    }, [buffer, map]);
+
+    useEffect(() => {
+        for (const polyline of polylinesRef.current) {
+            polyline.setStyle({ color });
+        }
+    }, [color]);
 
     return null;
 };
@@ -56,9 +66,16 @@ interface MapProps {
     hasLocation: boolean;
     trackBuffer?: TrackBuffer;
     trackColor?: string;
+    otherTracks?: RoomRouteTrack[];
 }
 
-export default function Map({ position, hasLocation, trackBuffer, trackColor = '#0E7861' }: MapProps) {
+export default function Map({
+      position,
+      hasLocation,
+      trackBuffer,
+      trackColor = '#0E7861',
+      otherTracks = [],
+}: MapProps) {
     return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         <MapContainer 
@@ -77,6 +94,9 @@ export default function Map({ position, hasLocation, trackBuffer, trackColor = '
             </Marker>
         )}
         {trackBuffer && <TrackLayer buffer={trackBuffer} color={trackColor} />}
+        {otherTracks.map((track) => (
+            <TrackLayer key={track.routeId} buffer={track.buffer} color={track.color} />
+        ))}
         <RecenterMap center={position} />
         </MapContainer>
     </div>
