@@ -205,7 +205,7 @@ export default function Home({
             </div>
             <div className="text-left">
               <h3 className="font-bold text-gray-900 text-sm mb-1">活動履歴を見る</h3>
-              <p className="text-xs text-gray-500">参加回数・距離・時間・完成アート</p>
+              <p className="text-xs text-gray-500">記録回数・距離・時間・最近の活動</p>
             </div>
           </button>
         </div>

@@ -22,6 +22,28 @@ export interface AuthSession {
   room: Room;
 }
 
+export interface ActivityRecord {
+  routeId: number;
+  roomCode: string;
+  roomTitle: string;
+  isPrivate: boolean;
+  memberCount: number;
+  startedAt: string;
+  endedAt: string | null;
+  meters: number;
+  elapsedMs: number;
+}
+
+export interface ActivityHistory {
+  summary: {
+    recordings: number;
+    completed: number;
+    meters: number;
+    elapsedMs: number;
+  };
+  activities: ActivityRecord[];
+}
+
 export interface RoomMember {
   id: number;
   displayName: string;

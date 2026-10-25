@@ -20,6 +20,11 @@ type RoomRepository interface {
 	Ban(ctx context.Context, code string, userID, memberID int64) error
 	Unban(ctx context.Context, code string, userID, memberID int64) error
 	DeleteRoute(ctx context.Context, code string, userID, routeID int64) error
+	Activities(ctx context.Context, userID int64) ([]domain.Activity, error)
+}
+
+func (s *RoomService) Activities(ctx context.Context, userID int64) ([]domain.Activity, error) {
+	return s.rooms.Activities(ctx, userID)
 }
 
 type RoomService struct {

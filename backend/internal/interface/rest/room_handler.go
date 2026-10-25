@@ -41,6 +41,67 @@ type memberResponse struct {
 	Color       string `json:"color"`
 }
 
+type activitySummaryResponse struct {
+	Recordings int     `json:"recordings"`
+	Completed  int     `json:"completed"`
+	Meters     float64 `json:"meters"`
+	ElapsedMs  int64   `json:"elapsedMs"`
+}
+
+type activityResponse struct {
+	RouteID     int64      `json:"routeId"`
+	RoomCode    string     `json:"roomCode"`
+	RoomTitle   string     `json:"roomTitle"`
+	IsPrivate   bool       `json:"isPrivate"`
+	MemberCount int        `json:"memberCount"`
+	StartedAt   time.Time  `json:"startedAt"`
+	EndedAt     *time.Time `json:"endedAt"`
+	Meters      float64    `json:"meters"`
+	ElapsedMs   int64      `json:"elapsedMs"`
+}
+
+func (h *roomHandler) activities(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFromRequest(w, r)
+	if !ok {
+		return
+	}
+	activities, err := h.rooms.Activities(r.Context(), user.ID)
+	if err != nil {
+		slog.Error("get activities failed", "err", err, "user_id", user.ID)
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "活動履歴を取得できませんでした")
+		return
+	}
+
+	now := time.Now()
+	summary := activitySummaryResponse{Recordings: len(activities)}
+	items := make([]activityResponse, 0, len(activities))
+	for _, activity := range activities {
+		stats := activity.Route.Stats(now)
+		elapsedMs := stats.Elapsed.Milliseconds()
+		if activity.Route.EndedAt != nil {
+			summary.Completed++
+		}
+		summary.Meters += stats.Meters
+		summary.ElapsedMs += elapsedMs
+		items = append(items, activityResponse{
+			RouteID:     activity.Route.ID,
+			RoomCode:    activity.RoomCode,
+			RoomTitle:   activity.RoomTitle,
+			IsPrivate:   activity.IsPrivate,
+			MemberCount: activity.MemberCount,
+			StartedAt:   activity.Route.StartedAt,
+			EndedAt:     activity.Route.EndedAt,
+			Meters:      stats.Meters,
+			ElapsedMs:   elapsedMs,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, struct {
+		Summary    activitySummaryResponse `json:"summary"`
+		Activities []activityResponse      `json:"activities"`
+	}{Summary: summary, Activities: items})
+}
+
 func (h *roomHandler) create(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromRequest(w, r)
 	if !ok {
