@@ -8,6 +8,7 @@ import {
   Image as ImageIcon,
   Lock,
   RefreshCw,
+  Trash2,
   Users,
   Waypoints,
 } from 'lucide-react';
@@ -22,6 +23,8 @@ interface ActivityProps {
   isConnecting?: boolean;
   onRetry?: () => void;
   onBackToHome?: () => void;
+  onSelectActivity?: (activity: ActivityRecord) => void;
+  onDeleteActivity?: (activity: ActivityRecord) => void;
 }
 
 function formatDistance(meters: number): string {
@@ -77,6 +80,8 @@ export default function Activity({
   isConnecting = false,
   onRetry,
   onBackToHome,
+  onSelectActivity,
+  onDeleteActivity,
 }: ActivityProps) {
   const displayUsername = username?.trim() || null;
   const summary = history?.summary;
@@ -200,13 +205,29 @@ export default function Activity({
 
         <div className="space-y-4 mb-8">
           {history?.activities.map((activity) => (
-            <div key={activity.routeId} className="w-full flex items-center gap-4 text-left">
+            <div key={activity.routeId} className="w-full flex items-center gap-3 text-left">
+              <button
+                type="button"
+                onClick={() => onSelectActivity?.(activity)}
+                className="flex min-w-0 flex-1 items-center gap-4 rounded-2xl text-left hover:bg-gray-50"
+              >
               <div className="w-12 h-12 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center shrink-0">
                 {activity.memberCount > 1 ? <Users size={23} /> : <Footprints size={23} />}
               </div>
               <div className="flex-1 overflow-hidden">
                 <ActivityDetails activity={activity} />
               </div>
+              </button>
+              {onDeleteActivity && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteActivity(activity)}
+                  className="rounded-xl p-2 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                  aria-label={`${activity.roomTitle}の記録を削除`}
+                >
+                  <Trash2 size={18} />
+                </button>
+              )}
             </div>
           ))}
         </div>
