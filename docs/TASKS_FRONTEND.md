@@ -41,7 +41,7 @@ export type ServerMsg = ... // snapshot | route | points | route_end | member | 
 
 ## F1 の手順
 
-1. `useLeafletMap` — 地図を1個だけ作って ref で持つ。CARTO `dark_all`、**`preferCanvas: true`**
+1. `useLeafletMap` — 地図を1個だけ作って ref で持つ。タイルは OpenStreetMap 標準、**`preferCanvas: true`**
 2. `useTracks` — **`Map<routeId, {...}>`**。route 1本 = ポリラインの束
 3. **3段階でセグメントを分ける**
    - route が変わったら新しいレイヤグループ
