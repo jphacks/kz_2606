@@ -65,6 +65,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   );
   const [user, setUser] = useState<User | null>(null);
   const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [soloActivityName, setSoloActivityName] = useState<string | null>(null);
   const [teamRoom, setTeamRoom] = useState<Room | null>(null);
   const [hasTeamInviteQr, setHasTeamInviteQr] = useState(false);
   const [showTeamInviteQr, setShowTeamInviteQr] = useState(false);
@@ -1149,31 +1150,13 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
                 isLoggingOut={isLoggingOut}
                 onNavigateToLogin={() => navigateToScreen('login')}
                 onNavigateToRegister={() => navigateToScreen('signin')}
-                onStartSolo={() => navigateToScreen('solo_record')}
+                onStartSolo={(activityName) => {
+                  setSoloActivityName(activityName);
+                  navigateToScreen('solo_record');
+                }}
                 onNavigateToResult={() => navigateToScreen('result')}
                 onTeamCreated={handleTeamCreated}
               />
-            </div>
-            
-            {/* 🗺️ マップ画面へ進むボタン（テスト用） */}
-            <div style={{ padding: '20px', textAlign: 'center', backgroundColor: '#FAFAFA' }}>
-              <button
-                onClick={() => navigateToScreen('before_record')}
-                style={{
-                  width: '100%',
-                  padding: '14px 20px',
-                  background: '#0E7861',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  cursor: 'pointer',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  boxShadow: '0 4px 6px rgba(14, 120, 97, 0.2)'
-                }}
-              >
-                🗺️ マップ画面へ進む（テスト用）
-              </button>
             </div>
           </div>
         )}
@@ -1262,7 +1245,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               <BeforeRecord 
                 hasLocation={hasLocation} 
                 mode={currentScreen === 'solo_record' ? 'solo' : 'team'}
-                teamName={roomSnapshot?.room.title}
+                teamName={currentScreen === 'solo_record' ? soloActivityName ?? undefined : roomSnapshot?.room.title}
                 hasRoom={Boolean(currentScreen === 'solo_record' ? roomCode : teamRoom)}
                 members={roomSnapshot?.members.filter((member) => !member.banned) ?? []}
                 roomClosed={Boolean(roomSnapshot?.room.closedAt)}
