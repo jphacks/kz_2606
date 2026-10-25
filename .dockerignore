@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+.direnv
+**/.direnv
+**/node_modules
+**/dist
+**/coverage
+*.log
+result
+result-*

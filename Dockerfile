@@ -7,7 +7,7 @@ COPY frontend/ ./
 # vite.config.ts の outDir は ../backend/cmd/server/dist
 RUN npm run build
 
-FROM golang:1.23-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 # go.sum が必要。先に `make tidy` を実行してコミットしておくこと
 COPY backend/go.mod backend/go.sum ./
