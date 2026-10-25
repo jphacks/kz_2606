@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, ArrowRight } from 'lucide-react';
+import { UserRound, KeyRound, ArrowRight } from 'lucide-react';
 import { getApiErrorMessage, parseAuthUser } from '../lib/api';
 import type { User } from '../lib/types';
 
@@ -124,7 +124,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegi
               </label>
               <div className="relative flex items-center">
                 <span className="absolute left-3.5 text-[#7A9A88]">
-                  <Mail className="w-4 h-4" />
+                  <UserRound className="w-4 h-4" />
                 </span>
                 <input
                   type="text"
@@ -144,7 +144,7 @@ export default function Register({ onNavigateToLogin, onStartWithoutAuth, onRegi
               </label>
               <div className="relative flex items-center">
                 <span className="absolute left-3.5 text-[#7A9A88]">
-                  <Mail className="w-4 h-4" />
+                  <KeyRound className="w-4 h-4" />
                 </span>
                 <input
                   type="password"
