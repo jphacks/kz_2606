@@ -1,6 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import QRCode from 'qrcode';
+import { X } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import { defaultMemberColor } from '../lib/member_colors';
 import type { RoomRouteTrack } from '../lib/types';
@@ -81,6 +83,10 @@ interface MapProps {
     trackBuffer?: TrackBuffer;
     trackColor?: string;
     otherTracks?: RoomRouteTrack[];
+    inviteUrl?: string;
+    showInviteQr?: boolean;
+    onShowInviteQr?: () => void;
+    onDismissInviteQr?: () => void;
 }
 
 export default function Map({
@@ -89,7 +95,39 @@ export default function Map({
       trackBuffer,
       trackColor = defaultMemberColor,
       otherTracks = [],
+      inviteUrl,
+      showInviteQr = false,
+      onShowInviteQr,
+      onDismissInviteQr,
 }: MapProps) {
+    const [inviteQrCode, setInviteQrCode] = useState<string | null>(null);
+    const [qrCodeError, setQrCodeError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!inviteUrl) {
+            setInviteQrCode(null);
+            setQrCodeError(null);
+            return;
+        }
+
+        let cancelled = false;
+        setInviteQrCode(null);
+        setQrCodeError(null);
+        QRCode.toDataURL(inviteUrl, { width: 192, margin: 1 })
+            .then((dataUrl) => {
+                if (!cancelled) setInviteQrCode(dataUrl);
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setQrCodeError(error instanceof Error ? error.message : String(error));
+                }
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [inviteUrl]);
+
     return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         <MapContainer 
@@ -113,6 +151,43 @@ export default function Map({
         ))}
         <RecenterMap center={position} />
         </MapContainer>
+        {inviteUrl && !showInviteQr && (
+            <button
+                type="button"
+                onClick={onShowInviteQr}
+                className="absolute left-4 top-20 z-[1000] flex items-center gap-2 rounded-xl bg-white/95 px-3 py-2 text-sm font-bold text-gray-700 shadow-lg backdrop-blur-md hover:bg-white"
+            >
+                <span aria-hidden="true">▦</span>
+                QRコードを表示
+            </button>
+        )}
+        {inviteUrl && showInviteQr && (
+            <div
+                role="dialog"
+                aria-label="チーム招待QRコード"
+                className="absolute left-4 right-4 top-20 z-[1000] rounded-2xl bg-white/95 p-4 text-center shadow-2xl backdrop-blur-md"
+            >
+                <button
+                    type="button"
+                    onClick={onDismissInviteQr}
+                    className="absolute right-2 top-2 rounded-full p-1 text-gray-500 hover:bg-gray-100"
+                    aria-label="招待QRコードを閉じる"
+                >
+                    <X size={18} />
+                </button>
+                <p className="text-sm font-bold text-gray-900">チームができました</p>
+                <p className="mt-1 text-xs text-gray-500">このQRをメンバーに読み取ってもらいましょう</p>
+                {inviteQrCode ? (
+                    <img src={inviteQrCode} alt="チーム招待用QRコード" className="mx-auto mt-3 h-48 w-48" />
+                ) : qrCodeError ? (
+                    <p role="alert" className="mt-3 text-xs text-red-600">QRコードを生成できませんでした</p>
+                ) : (
+                    <div className="mx-auto mt-3 flex h-48 w-48 items-center justify-center text-sm text-gray-400">
+                        QRコードを生成中...
+                    </div>
+                )}
+            </div>
+        )}
     </div>
     );
 }
