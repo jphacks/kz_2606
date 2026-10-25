@@ -44,6 +44,23 @@ export interface ActivityHistory {
   activities: ActivityRecord[];
 }
 
+export interface HistoryRoute {
+  id: number;
+  memberId: number;
+  memberName: string;
+  color: string;
+  startedAt: string;
+  endedAt: string | null;
+  points: Point[];
+}
+
+export interface RoomHistory {
+  roomCode: string;
+  roomTitle: string;
+  closedAt: string | null;
+  routes: HistoryRoute[];
+}
+
 export interface RoomMember {
   id: number;
   displayName: string;

@@ -1,6 +1,6 @@
 // REST 呼び出し。
 
-import type { ActivityHistory, ActivityRecord, AuthSession, Room, RoomMember, User } from './types';
+import type { ActivityHistory, ActivityRecord, AuthSession, Point, Room, RoomHistory, RoomMember, User } from './types';
 
 export function parseAuthUser(payload: unknown): User | null {
   if (typeof payload !== 'object' || payload === null || !('user' in payload)) {
@@ -137,6 +137,72 @@ export async function getActivityHistory(): Promise<ActivityHistory> {
     },
     activities: activities as ActivityRecord[],
   };
+}
+
+function parseHistoryPoint(value: unknown): Point | null {
+  if (!Array.isArray(value) || value.length !== 4 || !value.every((part) => typeof part === 'number' && Number.isFinite(part))) {
+    return null;
+  }
+  return [value[0], value[1], value[2], value[3]];
+}
+
+export async function getRoomHistory(roomCode: string): Promise<RoomHistory> {
+  const response = await fetch(`/api/rooms/${encodeURIComponent(roomCode)}/history`);
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    throw new Error(getApiErrorMessage(payload, 'ルームの履歴を取得できませんでした'));
+  }
+  if (
+    typeof payload !== 'object' || payload === null ||
+    !('roomCode' in payload) || !('roomTitle' in payload) || !('closedAt' in payload) || !('routes' in payload) ||
+    typeof payload.roomCode !== 'string' || typeof payload.roomTitle !== 'string' ||
+    (payload.closedAt !== null && typeof payload.closedAt !== 'string') ||
+    !Array.isArray(payload.routes)
+  ) {
+    throw new Error('サーバーから不正なルーム履歴が返されました');
+  }
+
+  const routes = payload.routes.map((value: unknown): RoomHistory['routes'][number] | null => {
+    if (typeof value !== 'object' || value === null ||
+        !('id' in value) || !('memberId' in value) || !('memberName' in value) || !('color' in value) ||
+        !('startedAt' in value) || !('endedAt' in value) || !('points' in value) ||
+        typeof value.id !== 'number' || !Number.isSafeInteger(value.id) || value.id <= 0 ||
+        typeof value.memberId !== 'number' || typeof value.memberName !== 'string' ||
+        typeof value.color !== 'string' || typeof value.startedAt !== 'string' ||
+        (value.endedAt !== null && typeof value.endedAt !== 'string') || !Array.isArray(value.points)) {
+      return null;
+    }
+    const points = value.points.map((point: unknown) => parseHistoryPoint(point));
+    if (points.some((point) => point === null)) return null;
+    return {
+      id: value.id,
+      memberId: value.memberId,
+      memberName: value.memberName,
+      color: value.color,
+      startedAt: value.startedAt,
+      endedAt: value.endedAt,
+      points: points.filter((point): point is Point => point !== null),
+    };
+  });
+  if (routes.some((route) => route === null)) {
+    throw new Error('サーバーから不正なルーム履歴が返されました');
+  }
+  return {
+    roomCode: payload.roomCode,
+    roomTitle: payload.roomTitle,
+    closedAt: payload.closedAt,
+    routes: routes as RoomHistory['routes'],
+  };
+}
+
+export async function deleteActivity(activity: Pick<ActivityRecord, 'roomCode' | 'routeId'>): Promise<void> {
+  const response = await fetch(`/api/rooms/${encodeURIComponent(activity.roomCode)}/routes/${activity.routeId}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json();
+    throw new Error(getApiErrorMessage(payload, '記録を削除できませんでした'));
+  }
 }
 
 export async function logout(): Promise<void> {

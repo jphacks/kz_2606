@@ -30,6 +30,7 @@ func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomServic
 	mux.Handle("GET /api/auth/me", requireUser(authService, http.HandlerFunc(handler.me)))
 	mux.Handle("POST /api/rooms", requireUser(authService, http.HandlerFunc(rooms.create)))
 	mux.Handle("GET /api/activities", requireUser(authService, http.HandlerFunc(rooms.activities)))
+	mux.Handle("GET /api/rooms/{code}/history", requireUser(authService, http.HandlerFunc(rooms.history)))
 	mux.HandleFunc("GET /api/rooms/{code}", rooms.get)
 	mux.Handle("POST /api/rooms/{code}/join", requireUser(authService, http.HandlerFunc(rooms.join)))
 	mux.Handle("POST /api/rooms/{code}/close", requireUser(authService, http.HandlerFunc(admin.close)))

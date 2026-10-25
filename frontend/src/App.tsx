@@ -4,8 +4,9 @@ import MapView from './ui/map';
 import BeforeRecord from './ui/before_record';
 import Setting from './ui/setting';
 import Result from './ui/result';
+import HistoryMap from './ui/history_map';
 import Auth from './ui/Auth';
-import { buildInviteUrl, getActivityHistory, getCurrentSession, logout } from './lib/api';
+import { buildInviteUrl, deleteActivity, getActivityHistory, getCurrentSession, logout } from './lib/api';
 import { defaultMemberColor, normalizeMemberColor } from './lib/member_colors';
 import { shouldAcceptPoint } from './lib/geo';
 import {
@@ -24,9 +25,9 @@ import {
 } from './lib/ws';
 import { drainOutbox, enqueuePoints } from './lib/outbox';
 import { TrackBuffer } from './lib/track_buffer';
-import type { ActivityHistory, Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
+import type { ActivityHistory, ActivityRecord, Point, Room, RoomMember, RoomRouteTrack, RoomSnapshot, User } from './lib/types';
 
-type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'join';
+type Screen = 'home' | 'before_record' | 'solo_record' | 'setting' | 'login' | 'signin' | 'result' | 'history_map' | 'join';
 const JoinScreen = lazy(() => import('./components/JoinScreen'));
 
 interface RemoteRouteMeta {
@@ -88,6 +89,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [activityError, setActivityError] = useState('');
   const [isActivityLoading, setIsActivityLoading] = useState(false);
   const [activityReloadKey, setActivityReloadKey] = useState(0);
+  const [selectedActivity, setSelectedActivity] = useState<ActivityRecord | null>(null);
   const [recordingError, setRecordingError] = useState('');
   const [recordingMessage, setRecordingMessage] = useState('');
   const [isRecording, setIsRecording] = useState(false);
@@ -578,6 +580,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       signin: '/signin',
       solo_record: '/solo',
       result: '/result',
+      history_map: '/history',
     };
     const path = pathByScreen[screen];
     const shouldKeepInvite = inviteRoomCode !== null &&
@@ -615,6 +618,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         }
       });
     navigateToScreen(inviteRoomCode !== null ? 'join' : 'home', inviteRoomCode !== null);
+  };
+
+  const handleDeleteActivity = async (activity: ActivityRecord) => {
+    if (!window.confirm(`「${activity.roomTitle}」のこの記録を削除しますか？`)) return;
+    try {
+      await deleteActivity(activity);
+      setActivityReloadKey((value) => value + 1);
+    } catch (error: unknown) {
+      setActivityError(error instanceof Error ? error.message : '記録を削除できませんでした');
+    }
   };
 
   const handleTeamCreated = (room: Room) => {
@@ -1311,7 +1324,26 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
               isRecording={isRecording}
               isConnecting={isConnecting}
               onRetry={() => setActivityReloadKey((value) => value + 1)}
+              onSelectActivity={(activity) => {
+                setSelectedActivity(activity);
+                navigateToScreen('history_map');
+              }}
+              onDeleteActivity={handleDeleteActivity}
               onBackToHome={() => navigateToScreen('home')}
+            />
+          </div>
+        )}
+
+        {currentScreen === 'history_map' && selectedActivity && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <HistoryMap
+              activity={selectedActivity}
+              onBack={() => navigateToScreen('result')}
+              onDeleted={() => {
+                setSelectedActivity(null);
+                setActivityReloadKey((value) => value + 1);
+                navigateToScreen('result');
+              }}
             />
           </div>
         )}

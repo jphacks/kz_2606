@@ -60,6 +60,74 @@ type activityResponse struct {
 	ElapsedMs   int64      `json:"elapsedMs"`
 }
 
+type historyMemberResponse struct {
+	ID          int64  `json:"id"`
+	DisplayName string `json:"displayName"`
+	Color       string `json:"color"`
+}
+
+type historyRouteResponse struct {
+	ID         int64      `json:"id"`
+	MemberID   int64      `json:"memberId"`
+	MemberName string     `json:"memberName"`
+	Color      string     `json:"color"`
+	StartedAt  time.Time  `json:"startedAt"`
+	EndedAt    *time.Time `json:"endedAt"`
+	Points     [][4]any   `json:"points"`
+}
+
+func (h *roomHandler) history(w http.ResponseWriter, r *http.Request) {
+	user, ok := userFromRequest(w, r)
+	if !ok {
+		return
+	}
+	snapshot, _, err := h.rooms.Snapshot(r.Context(), r.PathValue("code"), user.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrMemberNotFound), errors.Is(err, domain.ErrMemberBanned), errors.Is(err, domain.ErrPrivateRoom):
+			writeAPIError(w, http.StatusForbidden, "forbidden", "このルームの履歴を閲覧する権限がありません")
+		case errors.Is(err, domain.ErrRoomNotFound), errors.Is(err, domain.ErrInvalidRoomCode):
+			writeAPIError(w, http.StatusNotFound, "room_not_found", "部屋が見つかりません")
+		default:
+			slog.Error("get room history failed", "err", err, "user_id", user.ID)
+			writeAPIError(w, http.StatusInternalServerError, "internal_error", "ルームの履歴を取得できませんでした")
+		}
+		return
+	}
+
+	members := make([]historyMemberResponse, 0, len(snapshot.Members))
+	memberByID := make(map[int64]domain.Member, len(snapshot.Members))
+	for _, member := range snapshot.Members {
+		memberByID[member.ID] = member
+		members = append(members, historyMemberResponse{
+			ID: member.ID, DisplayName: member.DisplayName, Color: member.Color,
+		})
+	}
+	routes := make([]historyRouteResponse, 0, len(snapshot.Routes))
+	for _, route := range snapshot.Routes {
+		member := memberByID[route.MemberID]
+		if member.BannedAt != nil {
+			continue
+		}
+		points := make([][4]any, 0, len(route.Points))
+		for _, point := range route.Points {
+			points = append(points, [4]any{point.Lat, point.Lng, point.TS, point.Acc})
+		}
+		routes = append(routes, historyRouteResponse{
+			ID: route.ID, MemberID: route.MemberID, MemberName: member.DisplayName,
+			Color: member.Color, StartedAt: route.StartedAt, EndedAt: route.EndedAt, Points: points,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, struct {
+		RoomCode  string                  `json:"roomCode"`
+		RoomTitle string                  `json:"roomTitle"`
+		ClosedAt  *time.Time              `json:"closedAt"`
+		Members   []historyMemberResponse `json:"members"`
+		Routes    []historyRouteResponse  `json:"routes"`
+	}{snapshot.Room.Code, snapshot.Room.Title, snapshot.Room.ClosedAt, members, routes})
+}
+
 func (h *roomHandler) activities(w http.ResponseWriter, r *http.Request) {
 	user, ok := userFromRequest(w, r)
 	if !ok {
