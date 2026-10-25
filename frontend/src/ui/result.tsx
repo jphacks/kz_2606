@@ -14,7 +14,15 @@ import {
   Circle
 } from 'lucide-react';
 
-export default function Activity() {
+interface ActivityProps {
+  username?: string;
+  roomName?: string;
+}
+
+export default function Activity({ username, roomName }: ActivityProps) {
+  const displayUsername = username?.trim() || null;
+  const displayRoomName = roomName?.trim() || 'チーム名未設定';
+
   return (
     <div 
       className="min-h-screen bg-[#F5F5F5] font-sans text-gray-800 relative flex flex-col"
@@ -27,10 +35,12 @@ export default function Activity() {
         </button>
         <div className="flex-1 ml-2">
           <h1 className="text-lg font-bold text-gray-900 leading-tight">これまでの活動</h1>
-          <p className="text-xs text-gray-500">さき（あなた） の記録</p>
+          <p className="text-xs text-gray-500">
+            {displayUsername ? `${displayUsername}（あなた）の記録` : 'あなたの記録'}
+          </p>
         </div>
         <div className="w-10 h-10 bg-[#EBF5F3] text-[#0e7861] rounded-2xl flex items-center justify-center font-bold text-lg">
-          さ
+          {displayUsername?.charAt(0) ?? <Footprints size={20} />}
         </div>
       </header>
 
@@ -110,7 +120,7 @@ export default function Activity() {
             </div>
           </div>
           <div className="p-5">
-            <p className="text-xs text-gray-500 mb-1">まちあるき部・2026.10.24</p>
+            <p className="text-xs text-gray-500 mb-1">{displayRoomName}・2026.10.24</p>
             <h4 className="text-xl font-bold text-gray-900 mb-3">吉祥寺にハートを描こう</h4>
             <div className="flex justify-between items-center text-sm font-medium mb-4">
               <span className="text-gray-600">みんなの距離 <span className="text-gray-900">6.00 km</span></span>
@@ -132,7 +142,7 @@ export default function Activity() {
             <h3 className="text-lg font-bold text-gray-900 mb-2">活動履歴</h3>
             <div className="flex items-center gap-1 text-[#0e7861] text-xs font-bold bg-[#EBF5F3] px-2 py-1 rounded-md inline-flex">
               <Users size={14} />
-              まちあるき部
+              {displayRoomName}
             </div>
           </div>
           <span className="text-xs text-gray-500">全3件・新しい順</span>

@@ -7,29 +7,30 @@ export interface Member {
   name: string;
   status: string;
   distance: string;
+  elapsed?: string;
   color: string;
-  avatarBg: string;
   isMe?: boolean; // 自分自身かどうか
 }
 
 interface SettingProps {
   teamName?: string;
+  hasRoom?: boolean;
   memberCount?: number;
   members?: Member[];
+  isMembersLoading?: boolean;
+  inviteUrl?: string;
   initialColor?: string;
   onSaveAndReturn?: (selectedColor: string) => void;
   onBack?: () => void;
 }
 
 export default function Setting({
-  teamName = "まちあるき部",
-  memberCount = 4,
-  members = [
-    { id: '1', name: 'さき', status: '記録中', distance: '1.24 km', color: '#0E7861', avatarBg: 'bg-[#0E7861]', isMe: true },
-    { id: '2', name: 'ゆうた', status: '記録中', distance: '0.98 km', color: '#E67E22', avatarBg: 'bg-[#E67E22]', isMe: false },
-    { id: '3', name: 'はる', status: '記録中', distance: '1.10 km', color: '#3498DB', avatarBg: 'bg-[#3498DB]', isMe: false },
-    { id: '4', name: 'りん', status: '記録中', distance: '0.86 km', color: '#E91E63', avatarBg: 'bg-[#E91E63]', isMe: false },
-  ],
+  teamName,
+  hasRoom = false,
+  memberCount,
+  members = [],
+  isMembersLoading = false,
+  inviteUrl,
   initialColor = '#0E7861',
   onSaveAndReturn,
   onBack
@@ -37,6 +38,7 @@ export default function Setting({
   // 選択中のカラーを管理するステート（前回保存した色を初期値にする）
   const [selectedColor, setSelectedColor] = useState(initialColor);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState('');
 
   // 10色（5色×2行）のカラーパレット
   const colors = [
@@ -52,10 +54,17 @@ export default function Setting({
     { name: 'ライム', hex: '#8BC34A' },
   ];
 
-  const handleCopyInvite = () => {
-    navigator.clipboard.writeText("https://machie.app/invite/sample");
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyInvite = async () => {
+    if (!inviteUrl) return;
+    setCopyError('');
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('招待リンクをコピーできませんでした:', error);
+      setCopyError('招待リンクをコピーできませんでした');
+    }
   };
 
   return (
@@ -72,17 +81,24 @@ export default function Setting({
           </button>
           <div>
             <h1 className="text-lg font-bold text-gray-900">メンバーとカラー</h1>
-            <p className="text-xs text-gray-500">{teamName}・{memberCount}人が参加中</p>
+            <p className="text-xs text-gray-500">
+              {teamName ?? (isMembersLoading ? 'チーム情報を取得中' : hasRoom ? 'チーム情報を取得できません' : 'チーム未参加')}
+              ・{isMembersLoading && memberCount === undefined
+                ? '参加人数を取得中'
+                : `${memberCount ?? members.length}人が参加中`}
+            </p>
           </div>
         </div>
         <button 
           onClick={handleCopyInvite}
+          disabled={!inviteUrl}
           className="p-2.5 bg-gray-50 border border-gray-200 rounded-full text-gray-600 hover:bg-gray-100 transition relative"
           title="招待リンクをコピー"
         >
           {copied ? <Check size={18} className="text-[#0E7861]" /> : <Copy size={18} />}
         </button>
       </header>
+      {copyError && <p role="alert" className="px-5 pt-2 text-xs text-red-600">{copyError}</p>}
 
       {/* --- メインコンテンツ --- */}
       <main className="px-5 pt-4 flex-1">
@@ -97,14 +113,21 @@ export default function Setting({
         <div className="bg-white border border-gray-200/80 rounded-2xl p-4 shadow-sm mb-6">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-sm font-bold text-gray-900">一緒に描いているメンバー</h2>
-            <span className="text-xs text-gray-400">{members.length} / {memberCount}人</span>
+            <span className="text-xs text-gray-400">
+              {isMembersLoading && memberCount === undefined
+                ? '取得中'
+                : `${members.length} / ${memberCount ?? members.length}人`}
+            </span>
           </div>
 
           <div className="divide-y divide-gray-100">
             {members.map((member) => (
               <div key={member.id} className="py-3 flex items-center justify-between first:pt-0 last:pb-0">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full ${member.avatarBg} text-white font-bold flex items-center justify-center text-sm shadow-sm`}>
+                  <div
+                    className="w-10 h-10 rounded-full text-white font-bold flex items-center justify-center text-sm shadow-sm"
+                    style={{ backgroundColor: member.color }}
+                  >
                     {member.name.charAt(0)}
                   </div>
                   <div>
@@ -118,6 +141,7 @@ export default function Setting({
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5">
                       ● {member.status}・{member.distance}
+                      {member.elapsed ? `・${member.elapsed}` : ''}
                     </p>
                   </div>
                 </div>
@@ -128,6 +152,15 @@ export default function Setting({
               </div>
             ))}
           </div>
+          {members.length === 0 && (
+            <p className="py-4 text-center text-sm text-gray-400">
+              {isMembersLoading
+                ? 'メンバー情報を取得中です'
+                : hasRoom
+                  ? 'メンバー情報はありません'
+                  : 'チームに参加していません'}
+            </p>
+          )}
         </div>
 
         {/* 自分の軌跡カラー選択 */}

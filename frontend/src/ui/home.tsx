@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { Waypoints, Footprints, Flag, Plus, X, History, QrCode, LogIn, LogOut, UserPlus } from 'lucide-react';
 import QRCode from 'qrcode';
 import { buildInviteUrl, createRoom } from '../lib/api';
+import type { Room } from '../lib/types';
 
 interface HomeProps {
   onNavigateToLogin?: () => void;
   onNavigateToRegister?: () => void;
   onStartSolo?: () => void;
+  onTeamCreated?: (room: Room) => void;
   onLogout?: () => void;
   isLoggingOut?: boolean;
   username?: string;
@@ -16,6 +18,7 @@ export default function Home({
   onNavigateToLogin,
   onNavigateToRegister,
   onStartSolo,
+  onTeamCreated,
   onLogout,
   isLoggingOut = false,
   username,
@@ -62,6 +65,7 @@ export default function Home({
     try {
       const room = await createRoom(title);
       setRoomCode(room.code);
+      onTeamCreated?.(room);
     } catch (err) {
       console.error('チームを作成できませんでした:', err);
       setCreateTeamError(err instanceof Error ? err.message : 'チームを作成できませんでした');
