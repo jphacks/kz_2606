@@ -70,6 +70,10 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const [hasRecorded, setHasRecorded] = useState(false);
   const authRequestVersion = useRef(0);
   const otherTracksRef = useRef(new Map<number, RoomRouteTrack>());
+  const activeTrackBufferRef = useRef<TrackBuffer | null>(null);
+  const activeRouteIdRef = useRef<number | null>(null);
+  const activeRouteMemberIdRef = useRef<number | null>(null);
+  const activeRouteColorRef = useRef(userColor);
   const socketRef = useRef<WebSocket | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const pendingPointsRef = useRef<Point[]>([]);
@@ -78,6 +82,23 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
   const connectingRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
   const stopRecordingRef = useRef<() => void>(() => {});
+
+  const preserveActiveTrack = () => {
+    const routeId = activeRouteIdRef.current;
+    const buffer = activeTrackBufferRef.current;
+    const memberId = activeRouteMemberIdRef.current;
+    if (routeId === null || !buffer || memberId === null) return;
+
+    otherTracksRef.current.set(routeId, {
+      routeId,
+      memberId,
+      color: activeRouteColorRef.current,
+      buffer,
+    });
+    setOtherTracks([...otherTracksRef.current.values()]);
+    activeRouteIdRef.current = null;
+    activeRouteMemberIdRef.current = null;
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -198,6 +219,11 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           console.error('サーバーから不正な記録開始情報が返されました:', message);
           return;
         }
+        if (route.member === myMemberId) {
+          activeRouteIdRef.current = route.id;
+          activeRouteMemberIdRef.current = route.member;
+          activeRouteColorRef.current = route.color;
+        }
         if (route.member !== myMemberId) {
           const current = otherTracksRef.current.get(route.id);
           otherTracksRef.current.set(route.id, current
@@ -279,6 +305,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         if (!routeEnd) {
           console.error('サーバーから不正な記録終了情報が返されました:', message);
           return;
+        }
+        if (routeEnd.memberId === myMemberId && activeRouteIdRef.current === routeEnd.routeId) {
+          preserveActiveTrack();
         }
         setRoomSnapshot((snapshot) => snapshot ? ({
           ...snapshot,
@@ -396,6 +425,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
       setTeamRoom(null);
       setRoomSnapshot(null);
       otherTracksRef.current.clear();
+      activeTrackBufferRef.current = null;
+      activeRouteIdRef.current = null;
+      activeRouteMemberIdRef.current = null;
       setOtherTracks([]);
       setRoomDataError('');
       setSessionLoaded(true);
@@ -430,6 +462,7 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
           console.error('終了前の位置情報を送信できませんでした:', err);
         }
       }
+      preserveActiveTrack();
       sendStop(socket);
     }
     if (recordingStartedAtRef.current !== null) {
@@ -556,6 +589,9 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
     setRecordingError('');
     setRecordingMessage('サーバーに接続しています...');
     const buffer = new TrackBuffer();
+    activeTrackBufferRef.current = buffer;
+    activeRouteIdRef.current = null;
+    activeRouteMemberIdRef.current = null;
     setTrackBuffer(buffer);
     setDistanceTravelled(0);
     setElapsedSeconds(0);
@@ -611,6 +647,16 @@ function MainExperience({ initialScreen }: { initialScreen: Screen }) {
         return;
       }
       if (message.t === 'route' && !routeStartedRef.current) {
+        const route = parseRouteStartedEvent(message);
+        if (!route) {
+          console.error('サーバーから不正な記録開始情報が返されました:', message);
+          setRecordingError('サーバーから不正な記録情報が届きました。');
+          stopRecording();
+          return;
+        }
+        activeRouteIdRef.current = route.id;
+        activeRouteMemberIdRef.current = route.member;
+        activeRouteColorRef.current = route.color;
         routeStartedRef.current = true;
         recordingRef.current = true;
         connectingRef.current = false;
