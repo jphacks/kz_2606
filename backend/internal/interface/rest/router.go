@@ -20,6 +20,7 @@ type CookieOptions struct {
 
 func NewRouter(authService *usecase.AuthService, roomService *usecase.RoomService, cookies CookieOptions, registry *ws.Registry) *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", health)
 	handler := &authHandler{service: authService, cookies: cookies}
 	rooms := &roomHandler{rooms: roomService, registry: registry}
 	admin := &adminHandler{rooms: roomService, registry: registry}
