@@ -242,7 +242,7 @@ go get github.com/gorilla/websocket github.com/jackc/pgx/v5
 ```
 Postgres
  ├ rooms / members / routes / points   ← 永続データとsnapshotの読み出し元
- └ routes_one_recording_per_room       ← 部屋内のactive routeを1本に制限
+ └ routes_one_recording_per_member     ← メンバーごとのactive routeを1本に制限
 
 Registry (map[roomCode]set[*client])
  └ WebSocket接続のみ管理。複数タブとオンライン状態を扱う

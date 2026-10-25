@@ -103,7 +103,7 @@ WebSocket で全員に配信するので、**他のメンバーの線が歩い�
 
 #### ハッカソンで開発した独自機能・技術
 
-* **部屋の中で「編集可」な軌跡は常に1本という不変条件** — 誰かが記録している間は他の人が記録を始められないようにし、DBの部分ユニーク索引（`routes_one_recording_per_room`）で保証しています。同時にリクエストが来ても2本目が作られません
+* **メンバーごとに独立して記録できる不変条件** — 各端末は自分の route を自由に開始・終了できます。owner の開始前はメンバーの開始を待機させ、owner が終了すると全員の route を終了して、owner の再開までメンバーの再開を止めます。DBの部分ユニーク索引（`routes_one_recording_per_member`）で同一メンバーの二重開始を防ぎます
   → [backend/internal/infrastructure/persistence/schema.sql](backend/internal/infrastructure/persistence/schema.sql)
 
 * **サーバーとクライアントで同じ距離計算** — haversineでの累積距離を両側に実装し、「30秒を超えて空いた区間は加算しない」という境界まで揃えました。数字が食い違わないよう、定数表に連動相手を明記しています
